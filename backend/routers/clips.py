@@ -7,6 +7,7 @@ from fastapi.responses import FileResponse
 
 from config import TRANSCRIPTS_DIR
 from utils.time_utils import parse_timestamp
+from services.director import generate_motion
 
 router = APIRouter(prefix="/api", tags=["clips"])
 
@@ -216,6 +217,55 @@ def get_clip_effects(clip_id: str):
             "clip_id": clip_id,
             "duration": round(clip_end - clip_start, 3),
             "effects": effects,
+        }
+    finally:
+        db.close()
+
+
+@router.get("/clips/{clip_id}/motion")
+def get_clip_motion(clip_id: str, refresh: bool = False):
+    """
+    AI-directed motion graphics shot list for a clip.
+
+    Calls Gemma to plan lower thirds, stat cards, and pull quotes based on the
+    transcript. Caches the result — pass ?refresh=true to regenerate.
+    """
+    from database import SessionLocal, Clip
+    db = SessionLocal()
+    try:
+        clip = db.query(Clip).filter(Clip.id == clip_id).first()
+        if not clip:
+            raise HTTPException(404, detail="Clip not found")
+
+        transcript_path = os.path.join(TRANSCRIPTS_DIR, f"{clip.job_id}.json")
+        if not os.path.exists(transcript_path):
+            raise HTTPException(404, detail="Transcript not found")
+
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript = json.load(f)
+
+        clip_start = parse_timestamp(clip.start_time)
+        clip_end = parse_timestamp(clip.end_time)
+        duration = clip_end - clip_start
+
+        words = []
+        for segment in transcript.get("segments", []):
+            for w in segment.get("words", []):
+                w_start = float(w["start"])
+                w_end = float(w["end"])
+                if w_end >= clip_start and w_start <= clip_end:
+                    words.append({
+                        "word": w["word"].strip(),
+                        "start": max(0.0, w_start - clip_start),
+                        "end": max(0.0, w_end - clip_start),
+                    })
+
+        cues = generate_motion(clip_id, words, duration, force=refresh)
+
+        return {
+            "clip_id": clip_id,
+            "duration": round(duration, 3),
+            "cues": cues,
         }
     finally:
         db.close()

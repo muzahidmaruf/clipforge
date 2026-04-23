@@ -10,9 +10,10 @@ UPLOADS_DIR = os.path.join(STORAGE_DIR, "uploads")
 TRANSCRIPTS_DIR = os.path.join(STORAGE_DIR, "transcripts")
 CLIPS_DIR = os.path.join(STORAGE_DIR, "clips")
 TEMP_DIR = os.path.join(STORAGE_DIR, "temp")
+MOTION_DIR = os.path.join(STORAGE_DIR, "motion")
 
 # Ensure directories exist
-for d in [UPLOADS_DIR, TRANSCRIPTS_DIR, CLIPS_DIR, TEMP_DIR]:
+for d in [UPLOADS_DIR, TRANSCRIPTS_DIR, CLIPS_DIR, TEMP_DIR, MOTION_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Limits

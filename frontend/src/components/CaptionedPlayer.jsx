@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Settings2 } from 'lucide-react'
 import { streamClip } from '../api/client'
+import MotionLayer from './motion/MotionLayer'
 
 // Cache fonts globally so all cards share one fetch
 let fontsCache = null
@@ -170,6 +171,7 @@ export default function CaptionedPlayer({ clip }) {
   const [secondary, setSecondary] = useState(() => readPref('cf_secondary', '#FFFFFF'))
   const [animation, setAnimation] = useState(() => readPref('cf_anim', 'pop'))
   const [effectsOn, setEffectsOn] = useState(() => readPref('cf_fx', 'true') === 'true')
+  const [motionOn, setMotionOn] = useState(() => readPref('cf_motion', 'true') === 'true')
   const [showSettings, setShowSettings] = useState(false)
 
   // Fetch subtitles
@@ -334,6 +336,14 @@ export default function CaptionedPlayer({ clip }) {
           </div>
         )
       })}
+
+      {/* AI-directed motion graphics layer (lower-thirds, stat cards, pull quotes) */}
+      <MotionLayer
+        clipId={clip.id}
+        currentTime={currentTime}
+        primaryColor={primary}
+        enabled={motionOn}
+      />
 
       {/* Caption overlay */}
       {activePhrase && (
@@ -533,6 +543,20 @@ export default function CaptionedPlayer({ clip }) {
               }`}
             >
               {effectsOn ? 'Emoji + zoom: ON' : 'Emoji + zoom: OFF'}
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-1">Motion graphics (AI directed)</label>
+            <button
+              onClick={() => savePref(setMotionOn, 'cf_motion')(!motionOn)}
+              className={`w-full py-1 rounded border text-xs ${
+                motionOn
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-background text-gray-300 border-border'
+              }`}
+            >
+              {motionOn ? 'Lower thirds / stat cards / quotes: ON' : 'Motion graphics: OFF'}
             </button>
           </div>
         </div>
