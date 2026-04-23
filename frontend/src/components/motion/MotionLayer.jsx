@@ -2,11 +2,19 @@ import { useEffect, useState, useRef } from 'react'
 import LowerThird from './LowerThird'
 import StatCard from './StatCard'
 import PullQuote from './PullQuote'
+import KineticSlam from './KineticSlam'
+import BulletCascade from './BulletCascade'
+import ProgressBar from './ProgressBar'
+import BarChart from './BarChart'
 
 const COMPONENTS = {
   lower_third: LowerThird,
   stat_card: StatCard,
   pull_quote: PullQuote,
+  kinetic_slam: KineticSlam,
+  bullet_cascade: BulletCascade,
+  progress_bar: ProgressBar,
+  bar_chart: BarChart,
 }
 
 /**

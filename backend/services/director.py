@@ -19,42 +19,67 @@ from config import (
 
 # Currently supported component types. Adding a new type = add it here + schema
 # below + a React component on the frontend.
-SUPPORTED_TYPES = {"lower_third", "stat_card", "pull_quote"}
+SUPPORTED_TYPES = {
+    "lower_third",
+    "stat_card",
+    "pull_quote",
+    "kinetic_slam",
+    "bullet_cascade",
+    "progress_bar",
+    "bar_chart",
+}
 
 DIRECTOR_PROMPT = """You are a senior motion graphics designer working on a short-form video (TikTok / Reels / Shorts). Your job is to read the word-level transcript below and plan a TIMELINE of on-screen motion graphics that make this clip feel designed, not raw.
 
-You have exactly THREE component types available. Use them sparingly — quality over quantity. A 60-second clip should have 3 to 6 cues total, never more than one graphic on screen at a time, and at least 3 seconds of breathing room between cues.
+You have SEVEN component types available. Use them sparingly — quality over quantity. A 60-second clip should have 4 to 7 cues total, never more than one graphic on screen at a time, and at least 2.5 seconds of breathing room between cues.
 
 ---
 
 COMPONENTS:
 
-1. **lower_third** — animated name/title strip. Use ONCE at the START of the clip ONLY if the transcript clearly identifies a speaker (name + role/credential). Do NOT invent names.
-   Fields: `title` (person's name, uppercase), `sub` (their role, title case, max 40 chars)
+1. **lower_third** — animated name/title strip. Use ONCE at the START only if the transcript clearly identifies a speaker (name + role). Do NOT invent names.
+   Fields: `title` (name, uppercase), `sub` (role, title case, max 40 chars)
 
-2. **stat_card** — big number pop. Use when the transcript mentions a specific statistic, percentage, dollar amount, or striking number that is central to the point. The number MUST appear in the transcript exactly. Skip if there's no real stat.
-   Fields: `number` (the figure exactly as said, e.g. "80%", "$2.4B", "10,000"), `label` (what the number represents, max 50 chars, title case)
+2. **stat_card** — big number pop. The number MUST appear verbatim in the transcript. Skip if no real stat.
+   Fields: `number` (e.g. "80%", "$2.4B", "10,000"), `label` (max 50 chars, title case)
 
-3. **pull_quote** — full-screen quote emphasis. Use for the SINGLE most powerful, quotable sentence in the clip — a punchy one-liner, counterintuitive claim, or mic-drop moment. Pick only ONE per clip.
-   Fields: `text` (a direct quote of the sentence, under 80 chars, ending with punctuation)
+3. **pull_quote** — full-screen quote. Use for the SINGLE most powerful, mic-drop sentence in the clip. At most ONE per clip.
+   Fields: `text` (direct quote, 8–80 chars, ends with punctuation)
+
+4. **kinetic_slam** — 2–5 individual words that slam onto screen one by one for dramatic emphasis. Use for punchlines, beat drops, or triple-beat emphasis moments (e.g. "THIS. CHANGES. EVERYTHING." or "FASTER. BETTER. CHEAPER."). Words must appear in sequence in the transcript around time `t`. At most ONE per clip.
+   Fields: `words` (array of 2–5 uppercased strings, each 2–14 chars)
+
+5. **bullet_cascade** — vertical list of 2–5 short items that cascade in. Use ONLY when the speaker enumerates a concrete list (e.g. "three things: attention, memory, and emotion"). Items must be the actual things listed.
+   Fields: `title` (optional short header, max 30 chars, title case), `items` (array of 2–5 strings, each 2–28 chars, title case, no trailing period)
+
+6. **progress_bar** — horizontal bar that fills to a percentage with a big number counter. Use for percentage-based claims (e.g. "73% of people...", "only 10% succeed"). Percentage must be in the transcript.
+   Fields: `label` (what the % measures, max 40 chars, title case), `value` (integer 0–100)
+
+7. **bar_chart** — 2–4 labeled horizontal bars growing to proportional lengths. Use ONLY when the speaker compares multiple concrete numeric values (e.g. "sales went from 40 to 68 to 120"). All values must be real numbers from the transcript.
+   Fields: `title` (optional short header, max 30 chars), `bars` (array of 2–4 objects: `{{label: string max 14 chars, value: number}}`)
 
 ---
 
 TIMING RULES:
 - `t` is the START time in seconds (float, relative to clip start at 0).
-- Align cues to when the speaker SAYS the relevant content, not before. For a stat, `t` should be slightly BEFORE the number is said (0.3s lead-in feels natural).
-- For `lower_third`, t should be between 0.5 and 3.0.
-- For `pull_quote`, t should be AFTER the quote starts — let the viewer hear the first few words, then reinforce visually.
+- Align cues to when the speaker starts SAYING the relevant content.
+- For `lower_third`, t between 0.5 and 3.0.
+- For `pull_quote`, `kinetic_slam`, `stat_card`, `progress_bar` — `t` should land as the content is being said (0.2–0.5s lead-in feels right).
+- For `bullet_cascade` — `t` at the start of the list phrase.
 - Never place a cue in the last 2 seconds of the clip.
 
 ---
 
 SELECTION RULES (critical):
-- If there's no speaker intro → NO lower_third.
-- If there's no real statistic → NO stat_card. Do not invent.
-- If nothing is quote-worthy → NO pull_quote.
-- It is perfectly fine to return an empty array. A plain clip is better than forced, generic graphics.
-- Do NOT describe actions, emotions, or anything outside of these three components.
+- No speaker intro? → NO `lower_third`.
+- No real stat/number? → NO `stat_card`.
+- No mic-drop quote? → NO `pull_quote`.
+- No 2–5 word emphatic punchline? → NO `kinetic_slam`.
+- No actual enumerated list? → NO `bullet_cascade`.
+- No percentage? → NO `progress_bar`.
+- No compared numeric values? → NO `bar_chart`.
+- It is perfectly fine to return an empty array. Plain is better than forced or fake.
+- NEVER invent numbers, names, or facts. Everything must come from the transcript.
 
 ---
 
@@ -71,8 +96,10 @@ Respond with ONLY a valid JSON array. No prose, no markdown, no code fences.
 Example:
 [
   {{"t": 1.2, "type": "lower_third", "title": "DR. ANDREW HUBERMAN", "sub": "Neuroscientist, Stanford"}},
-  {{"t": 18.4, "type": "stat_card", "number": "90%", "label": "Of habits form within 66 days"}},
-  {{"t": 42.0, "type": "pull_quote", "text": "Your brain literally rewires while you sleep."}}
+  {{"t": 14.0, "type": "bullet_cascade", "title": "Three Pillars", "items": ["Attention", "Memory", "Emotion"]}},
+  {{"t": 24.8, "type": "progress_bar", "label": "Habits form within 66 days", "value": 90}},
+  {{"t": 38.5, "type": "kinetic_slam", "words": ["THIS", "CHANGES", "EVERYTHING"]}},
+  {{"t": 48.0, "type": "pull_quote", "text": "Your brain rewires while you sleep."}}
 ]"""
 
 
@@ -161,6 +188,9 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
         label = str(cue.get("label", "")).strip()[:50]
         if not number or not label or len(number) > 10:
             return None
+        # Must contain at least one digit — otherwise it's not a stat
+        if not re.search(r"\d", number):
+            return None
         return {"t": round(t, 2), "type": cue_type, "number": number, "label": label}
 
     if cue_type == "pull_quote":
@@ -169,19 +199,82 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
             return None
         return {"t": round(t, 2), "type": cue_type, "text": text}
 
+    if cue_type == "kinetic_slam":
+        words = cue.get("words")
+        if not isinstance(words, list) or not (2 <= len(words) <= 5):
+            return None
+        clean = []
+        for w in words:
+            s = str(w).strip().upper()
+            if not (2 <= len(s) <= 14):
+                return None
+            clean.append(s)
+        return {"t": round(t, 2), "type": cue_type, "words": clean}
+
+    if cue_type == "bullet_cascade":
+        items = cue.get("items")
+        if not isinstance(items, list) or not (2 <= len(items) <= 5):
+            return None
+        clean = []
+        for it in items:
+            s = str(it).strip().rstrip(".").strip()
+            if not (2 <= len(s) <= 28):
+                return None
+            clean.append(s)
+        title = str(cue.get("title", "")).strip()[:30] or None
+        out = {"t": round(t, 2), "type": cue_type, "items": clean}
+        if title:
+            out["title"] = title
+        return out
+
+    if cue_type == "progress_bar":
+        label = str(cue.get("label", "")).strip()[:40]
+        try:
+            value = int(cue.get("value", -1))
+        except (TypeError, ValueError):
+            return None
+        if not label or not (0 <= value <= 100):
+            return None
+        return {"t": round(t, 2), "type": cue_type, "label": label, "value": value}
+
+    if cue_type == "bar_chart":
+        bars = cue.get("bars")
+        if not isinstance(bars, list) or not (2 <= len(bars) <= 4):
+            return None
+        clean_bars = []
+        for b in bars:
+            if not isinstance(b, dict):
+                return None
+            lab = str(b.get("label", "")).strip()[:14]
+            try:
+                val = float(b.get("value", -1))
+            except (TypeError, ValueError):
+                return None
+            if not lab or val < 0:
+                return None
+            clean_bars.append({"label": lab, "value": val})
+        if max(b["value"] for b in clean_bars) <= 0:
+            return None
+        title = str(cue.get("title", "")).strip()[:30] or None
+        out = {"t": round(t, 2), "type": cue_type, "bars": clean_bars}
+        if title:
+            out["title"] = title
+        return out
+
     return None
 
 
-def _dedupe_and_space(cues: list, min_gap: float = 3.0) -> list:
-    """Keep cues ordered by time, enforcing minimum gap and one type per clip for lower_third/pull_quote."""
+def _dedupe_and_space(cues: list, min_gap: float = 2.5) -> list:
+    """Order by time, enforce gap, allow only one of each singleton type per clip."""
     cues = sorted(cues, key=lambda c: c["t"])
     kept = []
     seen_singletons = set()
     last_t = -999.0
+    SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam"}
     for c in cues:
         if c["t"] - last_t < min_gap:
             continue
-        if c["type"] in ("lower_third", "pull_quote"):
+        if c["type"] in SINGLETONS:
             if c["type"] in seen_singletons:
                 continue
             seen_singletons.add(c["type"])
