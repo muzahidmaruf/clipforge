@@ -1,0 +1,12 @@
+version: '3.8'
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+  # Note: Ollama runs on the host for GPU access
+  # Install separately: curl -fsSL https://ollama.com/install.sh | sh
+  # Pull model: ollama pull gemma4
