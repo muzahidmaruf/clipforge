@@ -48,6 +48,111 @@ const SIZE_MAP = {
   large: 56,
 }
 
+const ANIMATIONS = ['none', 'pop', 'bounce', 'fadeup', 'emphasis']
+
+// Detect "loud" words from their text alone (ALL CAPS, numbers, or punctuation hits)
+const isLoudWord = (text) => {
+  if (!text) return false
+  const t = text.trim()
+  if (/[!?]$/.test(t)) return true
+  if (/\d/.test(t)) return true
+  const letters = t.replace(/[^A-Za-z]/g, '')
+  if (letters.length >= 3 && letters === letters.toUpperCase()) return true
+  return false
+}
+
+// Compute per-word styling based on animation preset + timing
+const wordStyle = ({
+  word,
+  currentTime,
+  isActive,
+  fontFamily,
+  fontSize,
+  primary,
+  secondary,
+  animation,
+}) => {
+  const base = {
+    fontFamily: `"${fontFamily}", "Inter", system-ui, sans-serif`,
+    fontSize: `${fontSize}px`,
+    fontWeight: 800,
+    lineHeight: 1.15,
+    color: isActive ? primary : secondary,
+    textShadow:
+      '0 0 6px rgba(0,0,0,0.95), 0 0 12px rgba(0,0,0,0.7), 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000',
+    textTransform: 'uppercase',
+    letterSpacing: '0.01em',
+    whiteSpace: 'nowrap',
+    display: 'inline-block',
+    transition: 'transform 80ms ease-out, color 60ms linear',
+    transform: 'scale(1)',
+    opacity: 1,
+  }
+
+  if (animation === 'none') {
+    return base
+  }
+
+  if (animation === 'pop') {
+    return {
+      ...base,
+      transform: isActive ? 'scale(1.18)' : 'scale(1)',
+      transition: 'transform 140ms cubic-bezier(.34,1.56,.64,1), color 60ms linear',
+    }
+  }
+
+  if (animation === 'bounce') {
+    // When active, translate-Y animates with a short spring
+    const delta = Math.max(0, currentTime - word.start)
+    const activeWindow = 0.22 // seconds of bounce on entry
+    const t = Math.min(1, delta / activeWindow)
+    // easeOutBack-ish
+    const ease = 1 - Math.pow(1 - t, 3)
+    const y = isActive ? -12 * (1 - ease) : 0
+    return {
+      ...base,
+      transform: `translateY(${y}px) scale(${isActive ? 1.08 : 1})`,
+    }
+  }
+
+  if (animation === 'fadeup') {
+    // Each word fades+rises in during the first 180ms of its timestamp
+    const delta = currentTime - word.start
+    const dur = 0.18
+    const t = Math.min(1, Math.max(0, delta / dur))
+    const ease = 1 - Math.pow(1 - t, 2)
+    const y = (1 - ease) * 16
+    const opacity = currentTime < word.start ? 0 : ease
+    return {
+      ...base,
+      opacity,
+      transform: `translateY(${y}px) scale(${isActive ? 1.06 : 1})`,
+      transition: 'color 60ms linear',
+    }
+  }
+
+  if (animation === 'emphasis') {
+    const loud = isLoudWord(word.word)
+    if (loud && isActive) {
+      return {
+        ...base,
+        color: primary,
+        transform: 'scale(1.28) translateY(-4px)',
+        transition: 'transform 160ms cubic-bezier(.34,1.8,.64,1), color 60ms linear',
+        textShadow:
+          `0 0 10px ${primary}, 0 0 20px ${primary}aa, 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000`,
+      }
+    }
+    return {
+      ...base,
+      transform: isActive ? 'scale(1.12)' : 'scale(1)',
+      transition: 'transform 140ms cubic-bezier(.34,1.56,.64,1), color 60ms linear',
+    }
+  }
+
+  return base
+}
+
 export default function CaptionedPlayer({ clip }) {
   const videoRef = useRef(null)
   const [currentTime, setCurrentTime] = useState(0)
@@ -60,6 +165,9 @@ export default function CaptionedPlayer({ clip }) {
   const [position, setPosition] = useState(() => readPref('cf_pos', 'bottom'))
   const [size, setSize] = useState(() => readPref('cf_size', 'medium'))
   const [phraseSize, setPhraseSize] = useState(() => Number(readPref('cf_wps', '3')))
+  const [primary, setPrimary] = useState(() => readPref('cf_primary', '#FFD400'))
+  const [secondary, setSecondary] = useState(() => readPref('cf_secondary', '#FFFFFF'))
+  const [animation, setAnimation] = useState(() => readPref('cf_anim', 'pop'))
   const [showSettings, setShowSettings] = useState(false)
 
   // Fetch subtitles
@@ -88,7 +196,7 @@ export default function CaptionedPlayer({ clip }) {
     return () => { cancelled = true }
   }, [])
 
-  // Track video currentTime with rAF for smoother caption updates (better than onTimeUpdate which fires ~4x/sec)
+  // Track video currentTime with rAF for smoother caption updates
   useEffect(() => {
     let raf
     const tick = () => {
@@ -138,7 +246,6 @@ export default function CaptionedPlayer({ clip }) {
 
   return (
     <div className="relative w-full h-full bg-black">
-      {/* Native video - perfect audio sync */}
       <video
         ref={videoRef}
         src={streamClip(clip.id)}
@@ -178,20 +285,16 @@ export default function CaptionedPlayer({ clip }) {
               return (
                 <span
                   key={idx}
-                  style={{
-                    fontFamily: `"${fontFamily}", "Inter", system-ui, sans-serif`,
-                    fontSize: `${fontSize}px`,
-                    fontWeight: 800,
-                    lineHeight: 1.15,
-                    color: isActive ? '#FFD400' : '#FFFFFF',
-                    textShadow:
-                      '0 0 6px rgba(0,0,0,0.95), 0 0 12px rgba(0,0,0,0.7), 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000, -2px 2px 0 #000',
-                    transform: isActive ? 'scale(1.08)' : 'scale(1)',
-                    transition: 'transform 80ms ease-out, color 60ms linear',
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.01em',
-                    whiteSpace: 'nowrap',
-                  }}
+                  style={wordStyle({
+                    word: w,
+                    currentTime,
+                    isActive,
+                    fontFamily,
+                    fontSize,
+                    primary,
+                    secondary,
+                    animation,
+                  })}
                 >
                   {w.word}
                 </span>
@@ -217,7 +320,7 @@ export default function CaptionedPlayer({ clip }) {
       {/* Settings panel */}
       {showSettings && (
         <div
-          className="absolute top-12 left-2 right-2 max-w-xs bg-black/90 backdrop-blur border border-white/10 rounded-xl p-3 space-y-2 text-xs"
+          className="absolute top-12 left-2 right-2 max-w-xs bg-black/90 backdrop-blur border border-white/10 rounded-xl p-3 space-y-2 text-xs max-h-[80%] overflow-y-auto"
           onClick={(e) => e.stopPropagation()}
         >
           <div>
@@ -287,6 +390,52 @@ export default function CaptionedPlayer({ clip }) {
                   }`}
                 >
                   {n}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <label className="block text-gray-400 mb-1">Active color</label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="color"
+                  value={primary}
+                  onChange={(e) => savePref(setPrimary, 'cf_primary')(e.target.value)}
+                  className="w-8 h-7 p-0 rounded border border-border bg-transparent cursor-pointer"
+                />
+                <span className="text-gray-300 text-[10px] uppercase">{primary}</span>
+              </div>
+            </div>
+            <div>
+              <label className="block text-gray-400 mb-1">Other color</label>
+              <div className="flex items-center gap-1">
+                <input
+                  type="color"
+                  value={secondary}
+                  onChange={(e) => savePref(setSecondary, 'cf_secondary')(e.target.value)}
+                  className="w-8 h-7 p-0 rounded border border-border bg-transparent cursor-pointer"
+                />
+                <span className="text-gray-300 text-[10px] uppercase">{secondary}</span>
+              </div>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-1">Animation</label>
+            <div className="grid grid-cols-3 gap-1">
+              {ANIMATIONS.map((a) => (
+                <button
+                  key={a}
+                  onClick={() => savePref(setAnimation, 'cf_anim')(a)}
+                  className={`py-1 rounded border text-xs capitalize ${
+                    animation === a
+                      ? 'bg-accent text-white border-accent'
+                      : 'bg-background text-gray-300 border-border'
+                  }`}
+                >
+                  {a}
                 </button>
               ))}
             </div>
