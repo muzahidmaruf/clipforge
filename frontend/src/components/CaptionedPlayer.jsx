@@ -157,6 +157,7 @@ export default function CaptionedPlayer({ clip }) {
   const videoRef = useRef(null)
   const [currentTime, setCurrentTime] = useState(0)
   const [words, setWords] = useState(null)
+  const [effects, setEffects] = useState([])
   const [error, setError] = useState(null)
   const [fonts, setFonts] = useState([])
 
@@ -168,6 +169,7 @@ export default function CaptionedPlayer({ clip }) {
   const [primary, setPrimary] = useState(() => readPref('cf_primary', '#FFD400'))
   const [secondary, setSecondary] = useState(() => readPref('cf_secondary', '#FFFFFF'))
   const [animation, setAnimation] = useState(() => readPref('cf_anim', 'pop'))
+  const [effectsOn, setEffectsOn] = useState(() => readPref('cf_fx', 'true') === 'true')
   const [showSettings, setShowSettings] = useState(false)
 
   // Fetch subtitles
@@ -184,6 +186,18 @@ export default function CaptionedPlayer({ clip }) {
       .catch((e) => {
         if (!cancelled) setError(e.message)
       })
+    return () => { cancelled = true }
+  }, [clip.id])
+
+  // Fetch effects timeline (keyword-triggered emojis + punches)
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/clips/${clip.id}/effects`)
+      .then((r) => (r.ok ? r.json() : { effects: [] }))
+      .then((data) => {
+        if (!cancelled) setEffects(data.effects || [])
+      })
+      .catch(() => {})
     return () => { cancelled = true }
   }, [clip.id])
 
@@ -239,6 +253,25 @@ export default function CaptionedPlayer({ clip }) {
   const fontSize = SIZE_MAP[size] || SIZE_MAP.medium
   const posStyle = POSITION_MAP[position] || POSITION_MAP.bottom
 
+  // Compute active effects for the current frame
+  const activeEmojis = effectsOn
+    ? effects.filter((e) => e.type === 'emoji' && currentTime >= e.start && currentTime <= e.end)
+    : []
+  const activePunch = effectsOn
+    ? effects.find((e) => e.type === 'punch' && currentTime >= e.start && currentTime <= e.end)
+    : null
+
+  // Video "punch": subtle scale + tiny shake when an emphasized word hits
+  let videoTransform = 'scale(1)'
+  if (activePunch) {
+    const t = (currentTime - activePunch.start) / Math.max(0.001, activePunch.end - activePunch.start)
+    // Ease in then ease out (bell curve 0→1→0)
+    const bell = 1 - Math.abs(2 * t - 1)
+    const scale = 1 + (activePunch.intensity - 1) * bell
+    const shake = Math.sin(t * Math.PI * 6) * 4 * bell
+    videoTransform = `scale(${scale.toFixed(3)}) translateX(${shake.toFixed(2)}px)`
+  }
+
   const savePref = (setter, key) => (v) => {
     setter(v)
     writePref(key, v)
@@ -254,7 +287,53 @@ export default function CaptionedPlayer({ clip }) {
         playsInline
         preload="metadata"
         onTimeUpdate={handleTimeUpdate}
+        style={{
+          transform: videoTransform,
+          transition: activePunch ? 'none' : 'transform 160ms ease-out',
+          transformOrigin: 'center center',
+        }}
       />
+
+      {/* Emoji effect layer */}
+      {activeEmojis.map((fx, idx) => {
+        const t = (currentTime - fx.start) / Math.max(0.001, fx.end - fx.start)
+        // Entrance: 0 → 0.25 (spring scale up), Hold: 0.25 → 0.7, Exit: 0.7 → 1 (fade + drift up)
+        let scale, opacity, drift
+        if (t < 0.25) {
+          const p = t / 0.25
+          scale = 0.3 + (1 - Math.pow(1 - p, 3)) * 0.9  // 0.3 → 1.2
+        } else if (t < 0.7) {
+          scale = 1.2 - (t - 0.25) * 0.3  // gentle settle 1.2 → 1.07
+        } else {
+          scale = 1.07
+        }
+        if (t < 0.7) {
+          opacity = 1
+          drift = 0
+        } else {
+          const p = (t - 0.7) / 0.3
+          opacity = 1 - p
+          drift = -p * 30
+        }
+        return (
+          <div
+            key={`${fx.start}-${idx}`}
+            style={{
+              position: 'absolute',
+              left: `${fx.x * 100}%`,
+              top: `${fx.y * 100}%`,
+              fontSize: `${fontSize * 1.6}px`,
+              pointerEvents: 'none',
+              transform: `translate(-50%, calc(-50% + ${drift}px)) scale(${scale}) rotate(${fx.rotate}deg)`,
+              opacity,
+              filter: 'drop-shadow(0 4px 12px rgba(0,0,0,0.6))',
+              userSelect: 'none',
+            }}
+          >
+            {fx.value}
+          </div>
+        )
+      })}
 
       {/* Caption overlay */}
       {activePhrase && (
@@ -439,6 +518,22 @@ export default function CaptionedPlayer({ clip }) {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-1">
+              Effects {effects.length > 0 && <span className="text-gray-500">({effects.length} cues)</span>}
+            </label>
+            <button
+              onClick={() => savePref(setEffectsOn, 'cf_fx')(!effectsOn)}
+              className={`w-full py-1 rounded border text-xs ${
+                effectsOn
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-background text-gray-300 border-border'
+              }`}
+            >
+              {effectsOn ? 'Emoji + zoom: ON' : 'Emoji + zoom: OFF'}
+            </button>
           </div>
         </div>
       )}
