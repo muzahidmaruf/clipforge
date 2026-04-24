@@ -111,15 +111,18 @@ def _extract_json_array(raw: str) -> list:
 
 
 def _call_ollama_cloud(prompt: str, model_name: str):
-    """Call Ollama Cloud via OpenAI-compatible API (https://ollama.com/v1/chat/completions).
+    """Call Ollama Cloud API.
 
-    Qwen 3.5 Cloud compatibility notes:
-    - Uses 'max_completion_tokens' instead of 'max_tokens' (OpenAI spec)
-    - Some models may not support all parameters (temperature, top_p)
+    Ollama Cloud supports two API formats:
+    1. OpenAI-compatible: POST /v1/chat/completions (with Bearer token)
+    2. Native Ollama:    POST /api/generate (with API key header)
+
+    We try OpenAI-compatible first, then fall back to native format.
     """
     if not OLLAMA_CLOUD_API_KEY:
         raise RuntimeError("OLLAMA_CLOUD_API_KEY not set — get one at https://ollama.com/settings/keys")
 
+    # Try OpenAI-compatible endpoint first (preferred)
     url = f"{OLLAMA_CLOUD_BASE_URL}/v1/chat/completions"
 
     # Build request body with parameters that Qwen 3.5 Cloud supports
@@ -127,14 +130,11 @@ def _call_ollama_cloud(prompt: str, model_name: str):
         "model": model_name,
         "messages": [{"role": "user", "content": prompt}],
         "stream": False,
+        "temperature": 0.3,
+        "max_completion_tokens": 2000,
     }
 
-    # Add optional parameters only if they're likely to be supported
-    # Qwen 3.5 Cloud supports temperature and max_completion_tokens
-    request_body["temperature"] = 0.3
-    request_body["max_completion_tokens"] = 2000
-
-    # top_p may not be supported by all models, so we omit it for compatibility
+    print(f"[analysis] calling Ollama Cloud at {url} with model={model_name}")
 
     try:
         response = requests.post(
@@ -146,20 +146,28 @@ def _call_ollama_cloud(prompt: str, model_name: str):
             json=request_body,
             timeout=OLLAMA_CLOUD_TIMEOUT,
         )
+
+        # If we get 404 on OpenAI endpoint, try native Ollama format
+        if response.status_code == 404:
+            print(f"[analysis] OpenAI endpoint returned 404, trying native Ollama format...")
+            return _call_ollama_native(prompt, model_name)
+
         response.raise_for_status()
         response_data = response.json()
 
-        # Check if response has the expected structure
         if "choices" not in response_data or len(response_data["choices"]) == 0:
             print(f"[analysis] unexpected API response structure: {response_data}")
             raise RuntimeError("API returned empty or invalid response")
 
         raw = response_data["choices"][0]["message"]["content"].strip()
-
         print(f"[analysis] raw model response (first 500 chars): {raw[:500]}")
-
         return _extract_json_array(raw)
+
     except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 404:
+            # Try native format
+            print(f"[analysis] OpenAI endpoint returned 404, trying native Ollama format...")
+            return _call_ollama_native(prompt, model_name)
         # Log the full error response for debugging
         try:
             error_body = e.response.json() if e.response else {}
@@ -173,6 +181,43 @@ def _call_ollama_cloud(prompt: str, model_name: str):
     except Exception as e:
         print(f"[analysis] unexpected error: {type(e).__name__}: {e}")
         raise
+
+
+def _call_ollama_native(prompt: str, model_name: str):
+    """Call Ollama Cloud using native /api/generate endpoint.
+
+    This is the fallback for when the OpenAI-compatible endpoint doesn't work.
+    """
+    url = f"{OLLAMA_CLOUD_BASE_URL}/api/generate"
+
+    request_body = {
+        "model": model_name,
+        "prompt": prompt,
+        "stream": False,
+        "options": {
+            "temperature": 0.3,
+            "num_predict": 2000,
+        }
+    }
+
+    print(f"[analysis] calling native Ollama at {url} with model={model_name}")
+
+    response = requests.post(
+        url,
+        headers={
+            "Authorization": f"Bearer {OLLAMA_CLOUD_API_KEY}",
+            "Content-Type": "application/json",
+        },
+        json=request_body,
+        timeout=OLLAMA_CLOUD_TIMEOUT,
+    )
+    response.raise_for_status()
+    response_data = response.json()
+
+    # Native format returns 'response' field instead of 'choices[0].message.content'
+    raw = response_data.get("response", "").strip()
+    print(f"[analysis] raw model response (first 500 chars): {raw[:500]}")
+    return _extract_json_array(raw)
 
 
 def analyze_transcript(transcript: str, duration: str, model_name: str = None, num_clips: int = 5):
