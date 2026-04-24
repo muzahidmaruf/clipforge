@@ -19,6 +19,8 @@ async def upload_video(
     file: UploadFile = File(...),
     whisper_model: str = Form("base"),
     ai_model: str = Form("gemma4:31b-cloud"),
+    mode: str = Form("clips"),
+    num_clips: int = Form(5),
     db: Session = Depends(get_db)
 ):
     # Validate extension
@@ -30,6 +32,15 @@ async def upload_video(
     valid_whisper = {"tiny", "base", "small", "medium", "large"}
     if whisper_model not in valid_whisper:
         raise HTTPException(400, detail=f"Invalid whisper model. Allowed: {valid_whisper}")
+
+    # Validate mode & clip count
+    mode = (mode or "clips").lower()
+    if mode not in {"clips", "clean", "both"}:
+        raise HTTPException(400, detail="mode must be one of: clips, clean, both")
+    try:
+        num_clips = max(1, min(15, int(num_clips)))
+    except (TypeError, ValueError):
+        num_clips = 5
 
     # Stream file to disk chunk-by-chunk (avoids loading entire video into RAM)
     job_id = str(uuid.uuid4())
@@ -75,7 +86,9 @@ async def upload_video(
         status=JobStatus.PENDING,
         video_path=file_path,
         whisper_model=whisper_model,
-        ai_model=ai_model
+        ai_model=ai_model,
+        mode=mode,
+        num_clips=num_clips,
     )
     db.add(job)
     db.commit()

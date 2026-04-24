@@ -34,6 +34,18 @@ class Job(Base):
     clips_count = Column(Integer, nullable=True)
     celery_task_id = Column(String, nullable=True)
 
+    # "clips" = only viral clips (default), "clean" = only cleaned full-length
+    # video with fillers/pauses stripped, "both" = run both pipelines.
+    mode = Column(String, default="clips")
+    # How many short clips to aim for (only used when mode in {clips, both})
+    num_clips = Column(Integer, default=5)
+
+    # Cleaned video pipeline outputs
+    cleaned_video_path = Column(String, nullable=True)
+    cleaned_duration = Column(Float, nullable=True)
+    original_duration = Column(Float, nullable=True)
+    cleaned_fillers_removed = Column(Integer, nullable=True)
+
     clips = relationship("Clip", back_populates="job", cascade="all, delete-orphan")
 
 class Clip(Base):
@@ -61,6 +73,32 @@ engine = create_engine(f"sqlite:///{DB_PATH}", connect_args={"check_same_thread"
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 Base.metadata.create_all(bind=engine)
+
+
+def _migrate_sqlite_add_columns():
+    """Tiny forward-only migration: add new columns to `jobs` if they're missing.
+    SQLAlchemy's create_all() does NOT add columns to existing tables, so this
+    backfills them for dev databases that predate the column additions."""
+    from sqlalchemy import text
+    want = {
+        "mode": "VARCHAR DEFAULT 'clips'",
+        "num_clips": "INTEGER DEFAULT 5",
+        "cleaned_video_path": "VARCHAR",
+        "cleaned_duration": "FLOAT",
+        "original_duration": "FLOAT",
+        "cleaned_fillers_removed": "INTEGER",
+    }
+    try:
+        with engine.begin() as conn:
+            existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(jobs)").fetchall()}
+            for col, decl in want.items():
+                if col not in existing:
+                    conn.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
+    except Exception as e:
+        print(f"[db migration] warning: {e}")
+
+
+_migrate_sqlite_add_columns()
 
 # Dependency
 def get_db():

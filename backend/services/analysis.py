@@ -13,7 +13,7 @@ from utils.time_utils import parse_timestamp
 
 GEMMA_PROMPT = """You are a top-tier short-form video editor who has produced thousands of viral clips for TikTok, YouTube Shorts, and Instagram Reels. You understand what makes people STOP scrolling.
 
-Below is a timestamped transcript from a long-form video. Your job is to identify the **4 to 7 best standalone clips** — not just chunks, but genuinely meaningful, self-contained stories, arguments, or insights that work without watching the rest of the video.
+Below is a timestamped transcript from a long-form video. Your job is to identify **exactly {num_clips} standalone clips** (or as close to that number as the source material supports — never invent weak clips to hit the count) — not just chunks, but genuinely meaningful, self-contained stories, arguments, or insights that work without watching the rest of the video.
 
 ---
 
@@ -108,9 +108,13 @@ def _call_ollama_cloud(prompt: str, model_name: str):
     return json.loads(raw)
 
 
-def analyze_transcript(transcript: str, duration: str, model_name: str = None):
+def analyze_transcript(transcript: str, duration: str, model_name: str = None, num_clips: int = 5):
     """Analyze transcript using Ollama Cloud API."""
-    prompt = GEMMA_PROMPT.format(transcript=transcript, duration=duration)
+    try:
+        num_clips = max(1, min(15, int(num_clips)))
+    except (TypeError, ValueError):
+        num_clips = 5
+    prompt = GEMMA_PROMPT.format(transcript=transcript, duration=duration, num_clips=num_clips)
 
     cloud_model = model_name or OLLAMA_CLOUD_MODEL
 

@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react'
 import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Scissors } from 'lucide-react'
+import { ArrowLeft, Scissors, Download, Wand2 } from 'lucide-react'
 import JobStatus from '../components/JobStatus'
 import ClipGrid from '../components/ClipGrid'
-import { getJob } from '../api/client'
+import { getJob, streamCleanedVideo, downloadCleanedVideo } from '../api/client'
+
+const formatSeconds = (s) => {
+  if (s == null || Number.isNaN(s)) return '—'
+  const m = Math.floor(s / 60)
+  const r = Math.round(s % 60)
+  return `${m}:${String(r).padStart(2, '0')}`
+}
 
 const POLL_INTERVAL = 3000
 
@@ -63,6 +70,9 @@ export default function Results() {
 
   const isDone = job?.status === 'completed'
   const hasClips = job?.clips && job.clips.length > 0
+  const cleaned = job?.cleaned
+  const hasCleaned = cleaned?.available
+  const mode = job?.mode || 'clips'
 
   return (
     <div className="min-h-screen">
@@ -90,8 +100,54 @@ export default function Results() {
           </div>
         )}
 
-        {/* Results */}
-        {isDone && (
+        {/* Cleaned video panel */}
+        {isDone && hasCleaned && (
+          <div className="mb-10 p-5 bg-card border border-border rounded-2xl">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Wand2 className="w-5 h-5 text-accent" />
+                <h2 className="text-xl font-bold text-white">Cleaned video</h2>
+              </div>
+              <a
+                href={downloadCleanedVideo(job.job_id || jobId)}
+                className="inline-flex items-center gap-2 px-3 py-2 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-medium transition-colors"
+              >
+                <Download className="w-4 h-4" />
+                Download
+              </a>
+            </div>
+
+            <video
+              src={streamCleanedVideo(job.job_id || jobId)}
+              controls
+              className="w-full max-h-[60vh] rounded-xl bg-black"
+              preload="metadata"
+            />
+
+            <div className="mt-4 grid grid-cols-3 gap-3 text-center">
+              <div className="p-2 bg-background rounded-lg">
+                <div className="text-[11px] text-gray-500 uppercase tracking-wide">Original</div>
+                <div className="text-lg font-semibold text-white">{formatSeconds(cleaned.original_duration)}</div>
+              </div>
+              <div className="p-2 bg-background rounded-lg">
+                <div className="text-[11px] text-gray-500 uppercase tracking-wide">Cleaned</div>
+                <div className="text-lg font-semibold text-accent">{formatSeconds(cleaned.cleaned_duration)}</div>
+              </div>
+              <div className="p-2 bg-background rounded-lg">
+                <div className="text-[11px] text-gray-500 uppercase tracking-wide">Saved</div>
+                <div className="text-lg font-semibold text-white">
+                  {formatSeconds(cleaned.saved_seconds)}
+                  {cleaned.fillers_removed != null && (
+                    <span className="ml-1 text-xs text-gray-500">· {cleaned.fillers_removed} fillers</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Clips grid */}
+        {isDone && (mode === 'clips' || mode === 'both') && (
           <div className="mb-8">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-2xl font-bold text-white">Your Clips</h2>
@@ -99,15 +155,20 @@ export default function Results() {
                 {job.clips_count || 0} clips generated
               </span>
             </div>
-            
+
             <ClipGrid clips={job.clips} />
           </div>
         )}
 
-        {/* Empty state */}
-        {isDone && !hasClips && (
+        {/* Empty states */}
+        {isDone && (mode === 'clips' || mode === 'both') && !hasClips && (
           <div className="text-center py-16">
             <p className="text-gray-500">No clips were generated from this video</p>
+          </div>
+        )}
+        {isDone && mode === 'clean' && !hasCleaned && (
+          <div className="text-center py-16">
+            <p className="text-gray-500">Cleaning didn't produce an output — the transcript may have been empty.</p>
           </div>
         )}
       </div>

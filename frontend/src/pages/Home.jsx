@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Scissors, ChevronDown } from 'lucide-react'
+import { Scissors, ChevronDown, Sparkles, Wand2, Layers } from 'lucide-react'
 import UploadZone from '../components/UploadZone'
 import JobList from '../components/JobList'
 import { uploadVideo } from '../api/client'
@@ -28,6 +28,8 @@ export default function Home() {
   const [whisperModel, setWhisperModel] = useState('base')
   const [aiModel, setAiModel] = useState('gemma4:31b-cloud')
   const [showSettings, setShowSettings] = useState(false)
+  const [mode, setMode] = useState('clips')        // 'clips' | 'clean' | 'both'
+  const [numClips, setNumClips] = useState(5)      // 1..15
   const navigate = useNavigate()
 
   const handleFileSelect = (selectedFile) => {
@@ -42,7 +44,7 @@ export default function Home() {
     setError(null)
 
     try {
-      const response = await uploadVideo(file, whisperModel, aiModel, setUploadProgress)
+      const response = await uploadVideo(file, whisperModel, aiModel, setUploadProgress, { mode, numClips })
       const { job_id } = response.data
       navigate(`/results/${job_id}`)
     } catch (err) {
@@ -78,6 +80,63 @@ export default function Home() {
 
         {file && (
           <>
+            {/* Mode selector */}
+            <div className="mt-5 p-4 bg-card border border-border rounded-xl">
+              <label className="block text-sm font-medium text-white mb-3">What do you want?</label>
+              <div className="grid grid-cols-3 gap-2">
+                {[
+                  { id: 'clips', icon: Sparkles, title: 'Viral clips', desc: 'AI-picked short clips' },
+                  { id: 'clean', icon: Wand2, title: 'Clean cut', desc: 'Remove fillers + pauses' },
+                  { id: 'both', icon: Layers, title: 'Both', desc: 'Clean + clips' },
+                ].map(({ id, icon: Icon, title, desc }) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setMode(id)}
+                    className={`p-3 rounded-lg border text-left transition-colors ${
+                      mode === id
+                        ? 'border-accent bg-accent/10 text-white'
+                        : 'border-border bg-background text-gray-300 hover:border-accent/40'
+                    }`}
+                  >
+                    <Icon className={`w-4 h-4 mb-1 ${mode === id ? 'text-accent' : 'text-gray-400'}`} />
+                    <div className="text-sm font-semibold">{title}</div>
+                    <div className="text-[11px] text-gray-500 leading-tight mt-0.5">{desc}</div>
+                  </button>
+                ))}
+              </div>
+
+              {(mode === 'clips' || mode === 'both') && (
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-sm font-medium text-white">Number of clips</label>
+                    <span className="text-sm text-accent font-mono">{numClips}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={1}
+                    max={15}
+                    step={1}
+                    value={numClips}
+                    onChange={(e) => setNumClips(Number(e.target.value))}
+                    className="w-full accent-accent"
+                  />
+                  <div className="flex justify-between text-[10px] text-gray-500 mt-1">
+                    <span>1</span>
+                    <span>5</span>
+                    <span>10</span>
+                    <span>15</span>
+                  </div>
+                </div>
+              )}
+
+              {mode === 'clean' && (
+                <p className="mt-3 text-xs text-gray-500 leading-relaxed">
+                  Uploads the full video, detects filler words (um, uh, like, you know…) and long silent pauses in the transcript, then stitches only the spoken parts back into one long cleaned video.
+                </p>
+              )}
+            </div>
+
             {/* Model Settings */}
             <button
               onClick={() => setShowSettings(!showSettings)}
@@ -134,7 +193,13 @@ export default function Home() {
               disabled={uploading}
               className="mt-4 w-full py-4 bg-accent hover:bg-accent-hover disabled:bg-accent/50 text-white font-semibold rounded-2xl transition-colors"
             >
-              {uploading ? 'Uploading...' : 'Generate Clips'}
+              {uploading
+                ? 'Uploading...'
+                : mode === 'clean'
+                  ? 'Clean Video'
+                  : mode === 'both'
+                    ? 'Clean + Generate Clips'
+                    : `Generate ${numClips} Clip${numClips === 1 ? '' : 's'}`}
             </button>
           </>
         )}

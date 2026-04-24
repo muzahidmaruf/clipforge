@@ -1,11 +1,29 @@
 import os
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_db, Job, Clip, JobStatus
-from models.schemas import JobResponse, JobWithClipsResponse, ClipResponse, DeleteResponse
+from models.schemas import (
+    JobResponse, JobWithClipsResponse, ClipResponse, DeleteResponse, CleanedVideoInfo
+)
 from utils.file_utils import delete_job_files
 from services.pipeline import process_video
+
+
+def _cleaned_info(job: Job) -> CleanedVideoInfo:
+    available = bool(job.cleaned_video_path and os.path.exists(job.cleaned_video_path))
+    if not available:
+        return CleanedVideoInfo(available=False)
+    orig = job.original_duration
+    cleaned = job.cleaned_duration
+    return CleanedVideoInfo(
+        available=True,
+        original_duration=orig,
+        cleaned_duration=cleaned,
+        saved_seconds=(orig - cleaned) if (orig is not None and cleaned is not None) else None,
+        fillers_removed=job.cleaned_fillers_removed,
+    )
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -19,7 +37,9 @@ def list_jobs(db: Session = Depends(get_db)):
         error_message=j.error_message,
         clips_count=j.clips_count,
         created_at=j.created_at,
-        filename=j.filename
+        filename=j.filename,
+        mode=j.mode,
+        num_clips=j.num_clips,
     ) for j in jobs]
 
 @router.get("/jobs/{job_id}", response_model=JobWithClipsResponse)
@@ -37,6 +57,10 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
         error_message=job.error_message,
         clips_count=job.clips_count,
         created_at=job.created_at,
+        filename=job.filename,
+        mode=job.mode,
+        num_clips=job.num_clips,
+        cleaned=_cleaned_info(job),
         clips=[ClipResponse(
             id=c.id,
             clip_index=c.clip_index,
@@ -134,8 +158,35 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(404, detail="Job not found")
     
     delete_job_files(job_id)
+    # Also blow away the cleaned video if one exists
+    if job.cleaned_video_path and os.path.exists(job.cleaned_video_path):
+        try:
+            os.remove(job.cleaned_video_path)
+        except OSError:
+            pass
     db.query(Clip).filter(Clip.job_id == job_id).delete()
     db.delete(job)
     db.commit()
-    
+
     return {"success": True}
+
+
+@router.get("/jobs/{job_id}/cleaned/stream")
+def stream_cleaned_video(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job or not job.cleaned_video_path or not os.path.exists(job.cleaned_video_path):
+        raise HTTPException(404, detail="Cleaned video not available")
+    return FileResponse(job.cleaned_video_path, media_type="video/mp4")
+
+
+@router.get("/jobs/{job_id}/cleaned/download")
+def download_cleaned_video(job_id: str, db: Session = Depends(get_db)):
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job or not job.cleaned_video_path or not os.path.exists(job.cleaned_video_path):
+        raise HTTPException(404, detail="Cleaned video not available")
+    base = os.path.splitext(job.filename or "cleaned")[0]
+    return FileResponse(
+        job.cleaned_video_path,
+        media_type="video/mp4",
+        filename=f"{base}_cleaned.mp4",
+    )

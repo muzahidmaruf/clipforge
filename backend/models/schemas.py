@@ -28,9 +28,19 @@ class JobResponse(BaseModel):
     clips_count: Optional[int] = None
     created_at: datetime
     filename: Optional[str] = None
+    mode: Optional[str] = None
+    num_clips: Optional[int] = None
+
+class CleanedVideoInfo(BaseModel):
+    available: bool
+    original_duration: Optional[float] = None
+    cleaned_duration: Optional[float] = None
+    saved_seconds: Optional[float] = None
+    fillers_removed: Optional[int] = None
 
 class JobWithClipsResponse(JobResponse):
     clips: List[ClipResponse] = []
+    cleaned: Optional[CleanedVideoInfo] = None
 
 class DeleteResponse(BaseModel):
     success: bool
