@@ -90,9 +90,26 @@ def process_video(self, job_id: str):
             ticker.start()
 
             try:
+                # Set a reasonable timeout based on video duration ( Whisper ~0.1-0.5x realtime on CPU)
+                # For a 60 min video with base model: expect ~6-30 min on CPU, ~1-5 min on GPU
+                video_dur = get_video_duration(job.video_path)
+                max_transcribe_time = max(300, video_dur * 2)  # 2x video duration, min 5 min
+                print(f"[pipeline] Whisper timeout set to {max_transcribe_time:.0f}s for {video_dur:.1f}s video")
+
+                # Use a simple timer to track progress based on actual Whisper output
+                import time
+                transcribe_start = time.time()
+
                 transcript_result = transcribe_video(
                     job.video_path, job_id, whisper_model, whisper_language
                 )
+
+                elapsed = time.time() - transcribe_start
+                print(f"[pipeline] Whisper completed in {elapsed:.1f}s")
+
+            except Exception as e:
+                print(f"[pipeline] Whisper transcription failed: {e}")
+                raise
             finally:
                 stop_ticker.set()
 
