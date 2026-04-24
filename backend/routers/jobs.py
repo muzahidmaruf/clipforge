@@ -93,20 +93,22 @@ def get_job_clips(job_id: str, db: Session = Depends(get_db)):
         created_at=c.created_at
     ) for c in clips]
 
-@router.post("/jobs/{job_id}/retry", response_model=JobResponse)
-def retry_job(job_id: str, db: Session = Depends(get_db)):
+@router.post("/jobs/{job_id}/resume", response_model=JobResponse)
+def resume_job(job_id: str, db: Session = Depends(get_db)):
+    """Re-queue the job. The pipeline will skip any stage that already has a
+    checkpoint on disk (transcript, cleaned video, segments, individual clips)."""
     job = db.query(Job).filter(Job.id == job_id).first()
     if not job:
         raise HTTPException(404, detail="Job not found")
+    if job.status not in (JobStatus.FAILED, JobStatus.PENDING):
+        raise HTTPException(400, detail="Job is already running or completed")
     if not job.video_path or not os.path.exists(job.video_path):
-        raise HTTPException(400, detail="Original video file no longer exists, cannot retry")
+        raise HTTPException(400, detail="Original video file no longer exists")
 
-    db.query(Clip).filter(Clip.job_id == job_id).delete()
-    job.status = JobStatus.PENDING
-    job.progress = 0
+    job.status        = JobStatus.PENDING
     job.error_message = None
-    job.clips_count = None
-    job.transcript_path = None
+    # Keep job.progress as-is so the UI shows where we left off until the
+    # worker picks it up and starts updating again.
     db.commit()
 
     task = process_video.delay(job_id)
@@ -120,8 +122,76 @@ def retry_job(job_id: str, db: Session = Depends(get_db)):
         error_message=job.error_message,
         clips_count=job.clips_count,
         created_at=job.created_at,
-        filename=job.filename
+        filename=job.filename,
+        mode=job.mode,
+        num_clips=job.num_clips,
     )
+
+
+@router.post("/jobs/{job_id}/restart", response_model=JobResponse)
+def restart_job(job_id: str, db: Session = Depends(get_db)):
+    """Full restart from scratch — wipes all checkpoints and clips, then re-queues."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job:
+        raise HTTPException(404, detail="Job not found")
+    if job.status not in (JobStatus.FAILED, JobStatus.PENDING):
+        raise HTTPException(400, detail="Job is already running or completed")
+    if not job.video_path or not os.path.exists(job.video_path):
+        raise HTTPException(400, detail="Original video file no longer exists")
+
+    # Wipe checkpoints from disk
+    for attr in ("transcript_path", "segments_path", "cleaned_video_path"):
+        path = getattr(job, attr, None)
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    # Wipe clip files and DB rows
+    existing_clips = db.query(Clip).filter(Clip.job_id == job_id).all()
+    for c in existing_clips:
+        if c.file_path and os.path.exists(c.file_path):
+            try:
+                os.remove(c.file_path)
+            except OSError:
+                pass
+    db.query(Clip).filter(Clip.job_id == job_id).delete()
+
+    # Reset job state
+    job.status              = JobStatus.PENDING
+    job.progress            = 0
+    job.error_message       = None
+    job.clips_count         = None
+    job.transcript_path     = None
+    job.segments_path       = None
+    job.cleaned_video_path  = None
+    job.cleaned_duration    = None
+    job.original_duration   = None
+    job.cleaned_fillers_removed = None
+    db.commit()
+
+    task = process_video.delay(job_id)
+    job.celery_task_id = task.id
+    db.commit()
+
+    return JobResponse(
+        job_id=job.id,
+        status=job.status,
+        progress=job.progress,
+        error_message=job.error_message,
+        clips_count=job.clips_count,
+        created_at=job.created_at,
+        filename=job.filename,
+        mode=job.mode,
+        num_clips=job.num_clips,
+    )
+
+
+# Keep /retry as an alias for /resume so old calls still work
+@router.post("/jobs/{job_id}/retry", response_model=JobResponse)
+def retry_job(job_id: str, db: Session = Depends(get_db)):
+    return resume_job(job_id, db)
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
 def cancel_job(job_id: str, db: Session = Depends(get_db)):

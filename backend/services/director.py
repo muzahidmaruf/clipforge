@@ -17,6 +17,48 @@ from config import (
     MOTION_DIR,
 )
 
+# Motion-graphics template library catalog (vendored in the frontend tree).
+# We read it so Gemma knows what templates/lotties are actually available.
+_LIBRARY_CATALOG_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        "..", "..", "frontend", "src", "components", "motion", "library", "catalog.json",
+    )
+)
+
+
+def _load_library_catalog():
+    """Load the vendored template library catalog. Silently returns None if
+    the frontend isn't installed (e.g. backend-only deploys)."""
+    try:
+        with open(_LIBRARY_CATALOG_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _format_catalog_for_prompt(catalog):
+    """Compact a catalog into a short bullet list Gemma can digest without
+    blowing the context budget."""
+    if not catalog:
+        return ""
+    libs = catalog.get("libraries", {})
+    lines = []
+    mu = libs.get("magic-ui", {}).get("components", [])
+    if mu:
+        lines.append("magic-ui (text + effects): " + ", ".join(mu[:40]))
+    mp = libs.get("motion-primitives", {}).get("components", [])
+    if mp:
+        lines.append("motion-primitives: " + ", ".join(mp))
+    rb = libs.get("react-bits", {}).get("categories", {})
+    for cat, names in rb.items():
+        if names:
+            lines.append(f"react-bits/{cat}: " + ", ".join(names[:30]))
+    lot = libs.get("lotties", {}).get("assets", [])
+    if lot:
+        lines.append("lotties (icon animations, JSON): " + ", ".join(lot))
+    return "\n".join(lines)
+
 # Currently supported component types. Adding a new type = add it here + schema
 # below + a React component on the frontend.
 SUPPORTED_TYPES = {
@@ -29,6 +71,8 @@ SUPPORTED_TYPES = {
     "bar_chart",
     "confetti",
     "word_treatment",
+    "template",
+    "lottie",
 }
 
 # All treatments the frontend can render for word_treatment cues.
@@ -112,6 +156,18 @@ FULL-SCREEN COMPONENTS (use sparingly, max 3 per clip, at least 4 seconds apart)
 8. **confetti** — particle celebration burst. Use ONCE per clip, ONLY for a genuine win/celebration/breakthrough/achievement moment (e.g. "finally got it", "we did it", "hit a million", "success", "after years of struggle"). Do NOT use for generic positive vibes.
    Fields: `intensity` ("low" | "medium" | "high") — `high` for huge wins, `low` for smaller positive beats
 
+9. **template** — drop in a pre-built motion-graphics template from the vendored library (see TEMPLATE LIBRARY below). Use for rich backgrounds, animated text effects, decorative borders, or full-screen hero moments that the built-in components don't cover. Pick a template whose NAME clearly matches the vibe of what the speaker is saying (e.g. `aurora` for a dreamy moment, `sparkles-text` for a magical reveal, `typing-text` for a reveal beat). Max 2 per clip. Keep the chosen name EXACTLY as it appears in the library list.
+   Fields: `library` ("magic-ui" | "motion-primitives" | "react-bits"), `name` (exact template name from the list), `category` (REQUIRED for react-bits: one of `text` / `animations` / `backgrounds` / `components`), optional `text` (if the template shows text, the caption it should display — short, from the transcript).
+
+10. **lottie** — play a small Lottie icon animation as an overlay. Use for punchy emoji-style reactions when the speaker says something that clearly maps to an available asset (e.g. `thumbs_up`, `heart_beat`, `rocket_launch`, `confetti_burst`, `trophy`). Max 3 per clip. The `lottie_id` MUST be from the LOTTIES list below.
+   Fields: `lottie_id` (exact asset name from the lotties list), optional `position` ("top-left" | "top-right" | "bottom-left" | "bottom-right" | "center"), optional `scale` (0.3–1.5, default 0.6).
+
+---
+
+TEMPLATE LIBRARY (available vendored assets — pick ONLY from these names):
+
+{template_library}
+
 ---
 
 TIMING RULES:
@@ -165,36 +221,43 @@ Example of a well-directed 45s clip (mostly word treatments, one peak moment):
 
 
 def _call_gemma(prompt: str) -> list:
+    """Call Ollama Cloud via OpenAI-compatible API (https://ollama.com/v1/chat/completions)."""
     if not OLLAMA_CLOUD_API_KEY:
         raise RuntimeError("OLLAMA_CLOUD_API_KEY not set")
 
-    url = f"{OLLAMA_CLOUD_BASE_URL}/api/generate"
+    url = f"{OLLAMA_CLOUD_BASE_URL}/v1/chat/completions"
     response = requests.post(
         url,
-        headers={"Authorization": f"Bearer {OLLAMA_CLOUD_API_KEY}"},
+        headers={
+            "Authorization": f"Bearer {OLLAMA_CLOUD_API_KEY}",
+            "Content-Type": "application/json",
+        },
         json={
             "model": OLLAMA_CLOUD_MODEL,
-            "prompt": prompt,
+            "messages": [{"role": "user", "content": prompt}],
             "stream": False,
-            "options": {
-                "temperature": 0.4,
-                "top_p": 0.9,
-                "num_predict": 1200,
-            },
+            "temperature": 0.4,
+            "top_p": 0.9,
+            "max_tokens": 1200,
         },
         timeout=OLLAMA_CLOUD_TIMEOUT,
     )
     response.raise_for_status()
-    raw = response.json()["response"].strip()
+    raw = response.json()["choices"][0]["message"]["content"].strip()
 
     # Strip markdown fences if present
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
+    if "```" in raw:
+        parts = raw.split("```")
+        for i, part in enumerate(parts):
+            if i % 2 == 1:
+                chunk = part.lstrip("json").lstrip("JSON").strip()
+                if chunk.startswith("["):
+                    raw = chunk
+                    break
+
     raw = raw.strip()
 
-    # Find the JSON array
+    # Find the JSON array anywhere in the response
     match = re.search(r"\[.*\]", raw, re.DOTALL)
     if match:
         raw = match.group(0)
@@ -220,6 +283,29 @@ def _build_transcript_text(words: list) -> str:
     if buf:
         lines.append(f"[{buf_start:.2f}s] {' '.join(buf)}")
     return "\n".join(lines)
+
+
+def _catalog_index(catalog):
+    """Build quick lookup sets for validating template/lottie cues."""
+    idx = {
+        "magic-ui": set(),
+        "motion-primitives": set(),
+        "react-bits": {},  # category -> set(names)
+        "lotties": set(),
+    }
+    if not catalog:
+        return idx
+    libs = catalog.get("libraries", {})
+    idx["magic-ui"] = set(libs.get("magic-ui", {}).get("components", []))
+    idx["motion-primitives"] = set(libs.get("motion-primitives", {}).get("components", []))
+    rb = libs.get("react-bits", {}).get("categories", {})
+    idx["react-bits"] = {cat: set(names) for cat, names in rb.items()}
+    idx["lotties"] = set(libs.get("lotties", {}).get("assets", []))
+    return idx
+
+
+# Cached catalog index (rebuilt on each module reload, which is fine for dev)
+_CATALOG_INDEX = _catalog_index(_load_library_catalog())
 
 
 def _validate_cue(cue: dict, duration: float) -> dict | None:
@@ -313,6 +399,55 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
             intensity = "medium"
         return {"t": round(t, 2), "type": cue_type, "intensity": intensity}
 
+    if cue_type == "template":
+        library = str(cue.get("library", "")).strip()
+        name = str(cue.get("name", "")).strip()
+        category = str(cue.get("category", "")).strip() or None
+        if library not in ("magic-ui", "motion-primitives", "react-bits"):
+            return None
+        if not name:
+            return None
+        if library == "react-bits":
+            if not category or category not in _CATALOG_INDEX["react-bits"]:
+                return None
+            if name not in _CATALOG_INDEX["react-bits"][category]:
+                return None
+        else:
+            if name not in _CATALOG_INDEX[library]:
+                return None
+        out = {"t": round(t, 2), "type": cue_type, "library": library, "name": name}
+        if category:
+            out["category"] = category
+        text = cue.get("text")
+        if text is not None:
+            s = str(text).strip()[:80]
+            if s:
+                out["text"] = s
+        return out
+
+    if cue_type == "lottie":
+        lottie_id = str(cue.get("lottie_id", "")).strip()
+        if not lottie_id:
+            return None
+        # If a catalog is installed, enforce membership. If not, reject all lottie cues.
+        if not _CATALOG_INDEX["lotties"] or lottie_id not in _CATALOG_INDEX["lotties"]:
+            return None
+        position = str(cue.get("position", "center")).strip().lower()
+        if position not in ("top-left", "top-right", "bottom-left", "bottom-right", "center"):
+            position = "center"
+        try:
+            scale = float(cue.get("scale", 0.6))
+        except (TypeError, ValueError):
+            scale = 0.6
+        scale = max(0.3, min(1.5, scale))
+        return {
+            "t": round(t, 2),
+            "type": cue_type,
+            "lottie_id": lottie_id,
+            "position": position,
+            "scale": round(scale, 2),
+        }
+
     if cue_type == "bar_chart":
         bars = cue.get("bars")
         if not isinstance(bars, list) or not (2 <= len(bars) <= 4):
@@ -349,10 +484,31 @@ def _dedupe_and_space(cues: list, min_gap: float = 2.5) -> list:
     last_fullscreen_t = -999.0
     SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam", "confetti"}
 
+    # Cap the number of templates and lotties per clip
+    template_budget = 2
+    lottie_budget = 3
+
     for c in cues:
         if c["type"] == "word_treatment":
-            # Word treatments don't need spacing — but enforce one treatment per word-time
+            # Word treatments don't need spacing
             kept.append(c)
+            continue
+
+        if c["type"] == "lottie":
+            if lottie_budget <= 0:
+                continue
+            lottie_budget -= 1
+            kept.append(c)
+            continue
+
+        if c["type"] == "template":
+            if template_budget <= 0:
+                continue
+            if c["t"] - last_fullscreen_t < min_gap:
+                continue
+            template_budget -= 1
+            kept.append(c)
+            last_fullscreen_t = c["t"]
             continue
 
         # Full-screen component — enforce gap and singleton rule
@@ -387,7 +543,13 @@ def generate_motion(clip_id: str, words: list, duration: float, force: bool = Fa
         return []
 
     transcript_text = _build_transcript_text(words)
-    prompt = DIRECTOR_PROMPT.format(transcript=transcript_text, duration=f"{duration:.1f}")
+    catalog = _load_library_catalog()
+    library_block = _format_catalog_for_prompt(catalog) if catalog else "(no template library installed — do NOT emit `template` or `lottie` cues)"
+    prompt = DIRECTOR_PROMPT.format(
+        transcript=transcript_text,
+        duration=f"{duration:.1f}",
+        template_library=library_block,
+    )
 
     try:
         raw_cues = _call_gemma(prompt)

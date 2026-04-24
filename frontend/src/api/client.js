@@ -10,12 +10,13 @@ export const uploadVideo = (
   whisperModel,
   aiModel,
   onProgress,
-  { mode = 'clips', numClips = 5 } = {}
+  { mode = 'clips', numClips = 5, whisperLanguage = 'auto' } = {}
 ) => {
   const formData = new FormData()
   formData.append('file', file)
   formData.append('whisper_model', whisperModel || 'base')
-  formData.append('ai_model', aiModel || 'gemma4:31b-cloud')
+  formData.append('whisper_language', whisperLanguage || 'auto')
+  formData.append('ai_model', aiModel || 'qwen3.5:32b-cloud')
   formData.append('mode', mode)
   formData.append('num_clips', String(numClips))
   return api.post('/upload', formData, {
@@ -36,7 +37,9 @@ export const getJobClips = (jobId) => api.get(`/jobs/${jobId}/clips`)
 
 export const deleteJob = (jobId) => api.delete(`/jobs/${jobId}`)
 
-export const retryJob = (jobId) => api.post(`/jobs/${jobId}/retry`)
+export const resumeJob  = (jobId) => api.post(`/jobs/${jobId}/resume`)
+export const restartJob = (jobId) => api.post(`/jobs/${jobId}/restart`)
+export const retryJob   = resumeJob  // backwards-compat alias
 
 export const cancelJob = (jobId) => api.post(`/jobs/${jobId}/cancel`)
 

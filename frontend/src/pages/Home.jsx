@@ -6,18 +6,45 @@ import JobList from '../components/JobList'
 import { uploadVideo } from '../api/client'
 
 const WHISPER_MODELS = [
-  { value: 'tiny', label: 'Tiny (fastest, lowest quality)' },
-  { value: 'base', label: 'Base (balanced)' },
-  { value: 'small', label: 'Small (better quality)' },
+  { value: 'tiny',   label: 'Tiny (fastest, lowest quality)' },
+  { value: 'base',   label: 'Base (balanced)' },
+  { value: 'small',  label: 'Small (better quality)' },
   { value: 'medium', label: 'Medium (best quality, 5GB RAM)' },
-  { value: 'large', label: 'Large (bestest, 10GB RAM)' },
+  { value: 'large',  label: 'Large (best, 10GB RAM)' },
+]
+
+const WHISPER_LANGUAGES = [
+  { value: 'auto', label: 'Auto-detect' },
+  { value: 'bn',   label: 'বাংলা — Bengali / Bangla' },
+  { value: 'en',   label: 'English' },
+  { value: 'hi',   label: 'हिन्दी — Hindi' },
+  { value: 'ur',   label: 'اردو — Urdu' },
+  { value: 'ar',   label: 'العربية — Arabic' },
+  { value: 'zh',   label: '中文 — Chinese' },
+  { value: 'es',   label: 'Español — Spanish' },
+  { value: 'fr',   label: 'Français — French' },
+  { value: 'de',   label: 'Deutsch — German' },
+  { value: 'pt',   label: 'Português — Portuguese' },
+  { value: 'ru',   label: 'Русский — Russian' },
+  { value: 'ja',   label: '日本語 — Japanese' },
+  { value: 'ko',   label: '한국어 — Korean' },
+  { value: 'tr',   label: 'Türkçe — Turkish' },
+  { value: 'it',   label: 'Italiano — Italian' },
 ]
 
 const AI_MODELS = [
-  { value: 'gemma4:31b-cloud', label: 'Gemma 4 31B Cloud (dense, 256K ctx)' },
-  { value: 'gemma4:26b-cloud', label: 'Gemma 4 26B Cloud (MoE, 256K ctx)' },
-  { value: 'gemma4:e4b-cloud', label: 'Gemma 4 E4B Cloud (edge, 128K ctx)' },
-  { value: 'gemma4:e2b-cloud', label: 'Gemma 4 E2B Cloud (edge, 128K ctx)' },
+  // ── Qwen 3.5 ──────────────────────────────────────────────────────────────
+  { value: 'qwen3.5:32b-cloud', label: 'Qwen 3.5 32B Cloud ★ recommended' },
+  { value: 'qwen3.5:14b-cloud', label: 'Qwen 3.5 14B Cloud (faster)' },
+  // ── Qwen 3 ────────────────────────────────────────────────────────────────
+  { value: 'qwen3:32b-cloud',   label: 'Qwen 3 32B Cloud' },
+  { value: 'qwen3:14b-cloud',   label: 'Qwen 3 14B Cloud' },
+  { value: 'qwen3:8b-cloud',    label: 'Qwen 3 8B Cloud (edge)' },
+  // ── Gemma 4 ───────────────────────────────────────────────────────────────
+  { value: 'gemma4:31b-cloud',  label: 'Gemma 4 31B Cloud (256K ctx)' },
+  { value: 'gemma4:26b-cloud',  label: 'Gemma 4 26B Cloud (MoE)' },
+  { value: 'gemma4:e4b-cloud',  label: 'Gemma 4 E4B Cloud (edge)' },
+  { value: 'gemma4:e2b-cloud',  label: 'Gemma 4 E2B Cloud (edge)' },
 ]
 
 export default function Home() {
@@ -26,10 +53,11 @@ export default function Home() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState(null)
   const [whisperModel, setWhisperModel] = useState('base')
-  const [aiModel, setAiModel] = useState('gemma4:31b-cloud')
+  const [aiModel, setAiModel] = useState('qwen3.5:32b-cloud')
   const [showSettings, setShowSettings] = useState(false)
-  const [mode, setMode] = useState('clips')        // 'clips' | 'clean' | 'both'
-  const [numClips, setNumClips] = useState(5)      // 1..15
+  const [mode, setMode] = useState('clips')             // 'clips' | 'clean' | 'both'
+  const [numClips, setNumClips] = useState(5)           // 1..15
+  const [whisperLanguage, setWhisperLanguage] = useState('auto')  // ISO 639-1 or 'auto'
   const navigate = useNavigate()
 
   const handleFileSelect = (selectedFile) => {
@@ -44,7 +72,7 @@ export default function Home() {
     setError(null)
 
     try {
-      const response = await uploadVideo(file, whisperModel, aiModel, setUploadProgress, { mode, numClips })
+      const response = await uploadVideo(file, whisperModel, aiModel, setUploadProgress, { mode, numClips, whisperLanguage })
       const { job_id } = response.data
       navigate(`/results/${job_id}`)
     } catch (err) {
@@ -162,6 +190,29 @@ export default function Home() {
                 </div>
 
                 <div>
+                  <label className="block text-sm font-medium text-white mb-2">Video Language</label>
+                  <select
+                    value={whisperLanguage}
+                    onChange={(e) => setWhisperLanguage(e.target.value)}
+                    className="w-full p-2.5 bg-background border border-border rounded-lg text-white text-sm focus:border-accent focus:outline-none"
+                  >
+                    {WHISPER_LANGUAGES.map((l) => (
+                      <option key={l.value} value={l.value}>{l.label}</option>
+                    ))}
+                  </select>
+                  {whisperLanguage !== 'auto' && whisperLanguage !== 'en' && (
+                    <p className="text-xs text-amber-400 mt-1">
+                      💡 For best results with non-English, use Whisper <strong>Small</strong> or above.
+                    </p>
+                  )}
+                  {whisperLanguage === 'auto' && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Auto-detect can misidentify Bangla/Hindi — set language explicitly for better accuracy.
+                    </p>
+                  )}
+                </div>
+
+                <div>
                   <label className="block text-sm font-medium text-white mb-2">AI Model (Ollama)</label>
                   <select
                     value={aiModel}
@@ -172,7 +223,7 @@ export default function Home() {
                       <option key={m.value} value={m.value}>{m.label}</option>
                     ))}
                   </select>
-                  <p className="text-xs text-gray-500 mt-1">Cloud model selected: {aiModel}</p>
+                  <p className="text-xs text-gray-500 mt-1">Uses Ollama Cloud API · model: {aiModel}</p>
                 </div>
               </div>
             )}

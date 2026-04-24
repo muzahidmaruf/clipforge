@@ -18,7 +18,8 @@ CHUNK_SIZE = 1024 * 1024  # 1 MB
 async def upload_video(
     file: UploadFile = File(...),
     whisper_model: str = Form("base"),
-    ai_model: str = Form("gemma4:31b-cloud"),
+    whisper_language: str = Form("auto"),
+    ai_model: str = Form("qwen3.5:32b-cloud"),
     mode: str = Form("clips"),
     num_clips: int = Form(5),
     db: Session = Depends(get_db)
@@ -32,6 +33,12 @@ async def upload_video(
     valid_whisper = {"tiny", "base", "small", "medium", "large"}
     if whisper_model not in valid_whisper:
         raise HTTPException(400, detail=f"Invalid whisper model. Allowed: {valid_whisper}")
+
+    # Validate whisper language (accept anything — Whisper will error at runtime for unknown codes)
+    from services.transcription import SUPPORTED_LANGUAGES
+    whisper_language = (whisper_language or "auto").strip().lower()
+    if whisper_language not in SUPPORTED_LANGUAGES:
+        whisper_language = "auto"  # fall back gracefully
 
     # Validate mode & clip count
     mode = (mode or "clips").lower()
@@ -86,6 +93,7 @@ async def upload_video(
         status=JobStatus.PENDING,
         video_path=file_path,
         whisper_model=whisper_model,
+        whisper_language=whisper_language,
         ai_model=ai_model,
         mode=mode,
         num_clips=num_clips,

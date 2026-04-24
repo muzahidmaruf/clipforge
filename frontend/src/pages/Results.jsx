@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { ArrowLeft, Scissors, Download, Wand2 } from 'lucide-react'
+import { useParams, Link, useNavigate } from 'react-router-dom'
+import { ArrowLeft, Scissors, Download, Wand2, Trash2, Play, RotateCcw } from 'lucide-react'
 import JobStatus from '../components/JobStatus'
 import ClipGrid from '../components/ClipGrid'
-import { getJob, streamCleanedVideo, downloadCleanedVideo } from '../api/client'
+import ConfirmDialog from '../components/ConfirmDialog'
+import { getJob, deleteJob, resumeJob, restartJob, streamCleanedVideo, downloadCleanedVideo } from '../api/client'
 
 const formatSeconds = (s) => {
   if (s == null || Number.isNaN(s)) return '—'
@@ -16,9 +17,14 @@ const POLL_INTERVAL = 3000
 
 export default function Results() {
   const { jobId } = useParams()
+  const navigate = useNavigate()
   const [job, setJob] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [showDeleteDialog, setShowDeleteDialog]   = useState(false)
+  const [deleting, setDeleting]                   = useState(false)
+  const [showRestartDialog, setShowRestartDialog] = useState(false)
+  const [actionLoading, setActionLoading]         = useState(false)
 
   useEffect(() => {
     let interval
@@ -45,6 +51,37 @@ export default function Results() {
     
     return () => clearInterval(interval)
   }, [jobId])
+
+  const handleDelete = async () => {
+    setDeleting(true)
+    try {
+      await deleteJob(jobId)
+      navigate('/')
+    } catch {
+      setDeleting(false)
+      setShowDeleteDialog(false)
+    }
+  }
+
+  const handleResume = async () => {
+    setActionLoading(true)
+    try {
+      await resumeJob(jobId)
+      // Polling will pick up the new status automatically
+    } catch { /* ignore */ } finally {
+      setActionLoading(false)
+    }
+  }
+
+  const handleRestart = async () => {
+    setActionLoading(true)
+    setShowRestartDialog(false)
+    try {
+      await restartJob(jobId)
+    } catch { /* ignore */ } finally {
+      setActionLoading(false)
+    }
+  }
 
   if (loading) {
     return (
@@ -75,6 +112,27 @@ export default function Results() {
   const mode = job?.mode || 'clips'
 
   return (
+    <>
+      <ConfirmDialog
+        open={showDeleteDialog}
+        title="Delete this project?"
+        message={`"${job?.filename || `Job ${jobId.slice(0, 8)}`}" and all its clips will be permanently removed. This can't be undone.`}
+        confirmLabel="Delete"
+        loading={deleting}
+        onConfirm={handleDelete}
+        onCancel={() => setShowDeleteDialog(false)}
+      />
+
+      <ConfirmDialog
+        open={showRestartDialog}
+        title="Restart from scratch?"
+        message="This will delete all checkpoints and clips, then re-run transcription and AI analysis from the beginning."
+        confirmLabel="Restart"
+        loading={actionLoading}
+        onConfirm={handleRestart}
+        onCancel={() => setShowRestartDialog(false)}
+      />
+
     <div className="min-h-screen">
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Header */}
@@ -86,11 +144,49 @@ export default function Results() {
             <ArrowLeft className="w-5 h-5" />
             <span className="text-sm">Back</span>
           </Link>
-          
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-2 flex-1">
             <Scissors className="w-5 h-5 text-accent" />
-            <span className="font-semibold text-white">Job {jobId.slice(0, 8)}...</span>
+            <span className="font-semibold text-white truncate">
+              {job?.filename || `Job ${jobId.slice(0, 8)}...`}
+            </span>
           </div>
+
+          {/* Resume / Restart — only for failed jobs */}
+          {job?.status === 'failed' && (
+            <div className="flex items-center gap-1">
+              <button
+                onClick={handleResume}
+                disabled={actionLoading}
+                title="Resume from checkpoint"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-accent hover:bg-accent/10 border border-accent/30 hover:border-accent transition-colors disabled:opacity-50"
+              >
+                <Play className="w-4 h-4" />
+                <span className="hidden sm:inline">Resume</span>
+              </button>
+              <button
+                onClick={() => setShowRestartDialog(true)}
+                disabled={actionLoading}
+                title="Restart from scratch"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-orange-400 hover:bg-orange-400/10 border border-transparent hover:border-orange-400/20 transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className="w-4 h-4" />
+                <span className="hidden sm:inline">Restart</span>
+              </button>
+            </div>
+          )}
+
+          {/* Delete project button */}
+          {job && (
+            <button
+              onClick={() => setShowDeleteDialog(true)}
+              title="Delete project"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm text-gray-400 hover:text-score-red hover:bg-score-red/10 border border-transparent hover:border-score-red/20 transition-colors"
+            >
+              <Trash2 className="w-4 h-4" />
+              <span className="hidden sm:inline">Delete</span>
+            </button>
+          )}
         </div>
 
         {/* Processing status */}
@@ -173,5 +269,6 @@ export default function Results() {
         )}
       </div>
     </div>
+    </>
   )
 }

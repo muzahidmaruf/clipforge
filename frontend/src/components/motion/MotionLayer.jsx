@@ -7,6 +7,8 @@ import BulletCascade from './BulletCascade'
 import ProgressBar from './ProgressBar'
 import BarChart from './BarChart'
 import ConfettiBurst from './ConfettiBurst'
+import TemplateRenderer from './TemplateRenderer'
+import LottiePlayer from './LottiePlayer'
 
 const COMPONENTS = {
   lower_third: LowerThird,
@@ -17,6 +19,8 @@ const COMPONENTS = {
   progress_bar: ProgressBar,
   bar_chart: BarChart,
   confetti: ConfettiBurst,
+  template: TemplateRenderer,
+  lottie: LottiePlayer,
 }
 
 /**

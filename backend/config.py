@@ -24,10 +24,12 @@ ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 # Whisper
 WHISPER_MODEL = "base"
 
-# Ollama Cloud (https://ollama.com/api/*)
+# Ollama Cloud — OpenAI-compatible endpoint: https://ollama.com/v1/chat/completions
+# Model options: qwen3.5-cloud, gemma3:27b-cloud, llama3.1:70b-cloud, etc.
+# See https://ollama.com/library/qwen3.5 for available Qwen models
 OLLAMA_CLOUD_BASE_URL = os.getenv("OLLAMA_CLOUD_BASE_URL", "https://ollama.com")
 OLLAMA_CLOUD_API_KEY = os.getenv("OLLAMA_CLOUD_API_KEY", "")
-OLLAMA_CLOUD_MODEL = os.getenv("OLLAMA_CLOUD_MODEL", "gemma4:31b-cloud")
+OLLAMA_CLOUD_MODEL = os.getenv("OLLAMA_CLOUD_MODEL", "qwen3.5-cloud")
 OLLAMA_CLOUD_TIMEOUT = int(os.getenv("OLLAMA_CLOUD_TIMEOUT", "120"))
 
 # FFmpeg

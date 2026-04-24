@@ -26,7 +26,8 @@ class Job(Base):
     progress = Column(Integer, default=0)
     error_message = Column(Text, nullable=True)
     whisper_model = Column(String, default="base")
-    ai_model = Column(String, default="gemma4:31b-cloud")
+    whisper_language = Column(String, default="auto")  # ISO 639-1 code or "auto"
+    ai_model = Column(String, default="qwen3.5:32b-cloud")
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     video_path = Column(String, nullable=False)
@@ -45,6 +46,9 @@ class Job(Base):
     cleaned_duration = Column(Float, nullable=True)
     original_duration = Column(Float, nullable=True)
     cleaned_fillers_removed = Column(Integer, nullable=True)
+
+    # Checkpoint: validated segments saved after analysis so resume skips re-analysis
+    segments_path = Column(String, nullable=True)
 
     clips = relationship("Clip", back_populates="job", cascade="all, delete-orphan")
 
@@ -87,6 +91,8 @@ def _migrate_sqlite_add_columns():
         "cleaned_duration": "FLOAT",
         "original_duration": "FLOAT",
         "cleaned_fillers_removed": "INTEGER",
+        "whisper_language": "VARCHAR DEFAULT 'auto'",
+        "segments_path": "VARCHAR",
     }
     try:
         with engine.begin() as conn:

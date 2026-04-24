@@ -25,139 +25,188 @@ celery_app = Celery(
 
 @celery_app.task(bind=True, max_retries=3)
 def process_video(self, job_id: str):
-    """Main Celery task that processes a video through the full pipeline"""
+    """Main Celery task — resumes from the last checkpoint automatically.
+
+    Checkpoints (skipped if already on disk / in DB):
+      1. Transcript JSON  → storage/transcripts/{job_id}.json
+      2. Cleaned video    → job.cleaned_video_path
+      3. Segments JSON    → storage/transcripts/{job_id}_segments.json
+      4. Individual clips → storage/clips/{job_id}/clip_NN.mp4  (skipped per-clip)
+    """
     db = SessionLocal()
-    
+
     try:
         job = db.query(Job).filter(Job.id == job_id).first()
         if not job:
             raise ValueError(f"Job {job_id} not found")
 
-        # Clean up any clips from previous attempts (prevents duplicates on retry)
-        db.query(Clip).filter(Clip.job_id == job_id).delete()
-        db.commit()
-
-        whisper_model = job.whisper_model or "base"
-        ai_model = job.ai_model or "gemma4:31b-cloud"
-        mode = (job.mode or "clips").lower()
+        whisper_model    = job.whisper_model    or "base"
+        whisper_language = job.whisper_language or "auto"
+        ai_model         = job.ai_model         or "qwen3.5:32b-cloud"
+        mode             = (job.mode or "clips").lower()
         if mode not in {"clips", "clean", "both"}:
             mode = "clips"
         num_clips = int(job.num_clips or 5)
-        
-        # STEP 1: Transcribing
-        job.status = JobStatus.TRANSCRIBING
-        job.progress = 10
-        db.commit()
-        self.update_state(state="PROGRESS", meta={"progress": 10, "status": "transcribing"})
 
-        # Tick progress from 10→34 while whisper runs (it gives no callbacks)
-        stop_ticker = threading.Event()
-        def _tick():
-            p = 11
-            while not stop_ticker.is_set() and p < 34:
-                time.sleep(6)
-                if stop_ticker.is_set():
-                    break
-                try:
-                    tick_db = SessionLocal()
-                    tick_job = tick_db.query(Job).filter(Job.id == job_id).first()
-                    if tick_job and tick_job.status == JobStatus.TRANSCRIBING:
-                        tick_job.progress = p
-                        tick_db.commit()
-                    tick_db.close()
-                except Exception:
-                    pass
-                p = min(p + 1, 33)
-        ticker = threading.Thread(target=_tick, daemon=True)
-        ticker.start()
+        # ------------------------------------------------------------------
+        # STAGE 1: Transcription
+        # ------------------------------------------------------------------
+        transcript_path = os.path.join(TRANSCRIPTS_DIR, f"{job_id}.json")
+        transcript_result = None
 
-        try:
-            transcript_result = transcribe_video(job.video_path, job_id, whisper_model)
-        finally:
-            stop_ticker.set()
-
-        transcript_text = format_transcript(transcript_result)
-        job.transcript_path = os.path.join(TRANSCRIPTS_DIR, f"{job_id}.json")
-        job.progress = 35
-        db.commit()
-        self.update_state(state="PROGRESS", meta={"progress": 35, "status": "transcribing"})
-        
-        # Get video duration
-        video_duration = get_video_duration(job.video_path)
-        duration_str = seconds_to_timestamp(video_duration)
-        
-        # -----------------------------------------------------------------
-        # BRANCH A: "clean" (filler + pause removal on full-length video)
-        # -----------------------------------------------------------------
-        if mode in ("clean", "both"):
-            job.status = JobStatus.CUTTING
-            job.progress = 45
+        if job.transcript_path and os.path.exists(job.transcript_path):
+            # Resume: load from disk
+            print(f"[pipeline] RESUME — transcript checkpoint found, skipping Whisper")
+            import json as _json
+            with open(job.transcript_path, "r", encoding="utf-8") as f:
+                transcript_result = _json.load(f)
+            job.progress = max(job.progress or 0, 35)
             db.commit()
-            self.update_state(state="PROGRESS", meta={"progress": 45, "status": "cleaning"})
+        else:
+            job.status = JobStatus.TRANSCRIBING
+            job.progress = 10
+            db.commit()
+            self.update_state(state="PROGRESS", meta={"progress": 10, "status": "transcribing"})
+
+            # Tick progress 10→34 while Whisper runs (no callbacks from Whisper)
+            stop_ticker = threading.Event()
+            def _tick():
+                p = 11
+                while not stop_ticker.is_set() and p < 34:
+                    time.sleep(6)
+                    if stop_ticker.is_set():
+                        break
+                    try:
+                        tick_db = SessionLocal()
+                        tick_job = tick_db.query(Job).filter(Job.id == job_id).first()
+                        if tick_job and tick_job.status == JobStatus.TRANSCRIBING:
+                            tick_job.progress = p
+                            tick_db.commit()
+                        tick_db.close()
+                    except Exception:
+                        pass
+                    p = min(p + 1, 33)
+            ticker = threading.Thread(target=_tick, daemon=True)
+            ticker.start()
 
             try:
-                stats = clean_video(
-                    job_id=job_id,
-                    input_path=job.video_path,
-                    transcript_result=transcript_result,
-                    video_duration=video_duration,
+                transcript_result = transcribe_video(
+                    job.video_path, job_id, whisper_model, whisper_language
                 )
-                job.cleaned_video_path = stats["output_path"]
-                job.cleaned_duration = stats["cleaned_duration"]
-                job.original_duration = stats["original_duration"]
-                job.cleaned_fillers_removed = stats["filler_words_removed"]
+            finally:
+                stop_ticker.set()
+
+            job.transcript_path = transcript_path
+            job.progress = 35
+            db.commit()
+            self.update_state(state="PROGRESS", meta={"progress": 35, "status": "transcribed"})
+
+        transcript_text = format_transcript(transcript_result)
+        video_duration  = get_video_duration(job.video_path)
+        duration_str    = seconds_to_timestamp(video_duration)
+
+        # ------------------------------------------------------------------
+        # STAGE 2: Clean video  (mode = clean | both)
+        # ------------------------------------------------------------------
+        if mode in ("clean", "both"):
+            if job.cleaned_video_path and os.path.exists(job.cleaned_video_path):
+                print("[pipeline] RESUME — cleaned video checkpoint found, skipping cleaner")
+                job.progress = max(job.progress or 0, 60)
                 db.commit()
-            except Exception as e:
-                # Clean step shouldn't kill the whole job if user also asked for clips
-                if mode == "clean":
-                    raise
-                print(f"Warning: clean step failed but continuing with clips: {e}")
+            else:
+                job.status   = JobStatus.CUTTING
+                job.progress = max(job.progress or 0, 45)
+                db.commit()
+                self.update_state(state="PROGRESS", meta={"progress": job.progress, "status": "cleaning"})
 
-            job.progress = 60
-            db.commit()
+                try:
+                    stats = clean_video(
+                        job_id=job_id,
+                        input_path=job.video_path,
+                        transcript_result=transcript_result,
+                        video_duration=video_duration,
+                    )
+                    job.cleaned_video_path    = stats["output_path"]
+                    job.cleaned_duration      = stats["cleaned_duration"]
+                    job.original_duration     = stats["original_duration"]
+                    job.cleaned_fillers_removed = stats["filler_words_removed"]
+                    db.commit()
+                except Exception as e:
+                    if mode == "clean":
+                        raise
+                    print(f"[pipeline] Warning: clean step failed, continuing with clips: {e}")
 
-        # -----------------------------------------------------------------
-        # BRANCH B: "clips" (viral short-clip pipeline)
-        # -----------------------------------------------------------------
+                job.progress = 60
+                db.commit()
+
+        # ------------------------------------------------------------------
+        # STAGE 3 + 4: Analyze → Cut clips  (mode = clips | both)
+        # ------------------------------------------------------------------
         if mode in ("clips", "both"):
-            # STEP 2: Analyzing
-            job.status = JobStatus.ANALYZING
-            job.progress = max(job.progress or 0, 65 if mode == "both" else 40)
-            db.commit()
-            self.update_state(state="PROGRESS", meta={"progress": job.progress, "status": "analyzing"})
+            segments_path = os.path.join(TRANSCRIPTS_DIR, f"{job_id}_segments.json")
 
-            segments = analyze_transcript(transcript_text, duration_str, ai_model, num_clips=num_clips)
-            valid_segments = validate_segments(segments, video_duration)
+            # ---- Stage 3: Analysis ----------------------------------------
+            if job.segments_path and os.path.exists(job.segments_path):
+                print("[pipeline] RESUME — segments checkpoint found, skipping AI analysis")
+                import json as _json
+                with open(job.segments_path, "r", encoding="utf-8") as f:
+                    valid_segments = _json.load(f)
+                job.progress = max(job.progress or 0, 70)
+                db.commit()
+            else:
+                job.status   = JobStatus.ANALYZING
+                job.progress = max(job.progress or 0, 65 if mode == "both" else 40)
+                db.commit()
+                self.update_state(state="PROGRESS", meta={"progress": job.progress, "status": "analyzing"})
 
-            if not valid_segments:
-                raise ValueError("No valid segments found after analysis")
+                segments       = analyze_transcript(transcript_text, duration_str, ai_model, num_clips=num_clips)
+                valid_segments = validate_segments(segments, video_duration)
 
-            # Cap to requested count (validator gives up to whatever Gemma returns)
-            valid_segments = sorted(valid_segments, key=lambda s: -s["virality_score"])[:num_clips]
-            # Re-index so clip_index is 1..N in virality order
-            for i, s in enumerate(valid_segments, start=1):
-                s["clip_index"] = i
+                if not valid_segments:
+                    raise ValueError("No valid segments found after analysis")
 
-            job.progress = 70
-            db.commit()
-            self.update_state(state="PROGRESS", meta={"progress": 70, "status": "cutting"})
+                # Sort by virality and cap to requested count
+                valid_segments = sorted(valid_segments, key=lambda s: -s["virality_score"])[:num_clips]
+                for i, s in enumerate(valid_segments, start=1):
+                    s["clip_index"] = i
 
-            # STEP 3: Cutting
+                # Save checkpoint so a resume skips this expensive API call
+                import json as _json
+                with open(segments_path, "w", encoding="utf-8") as f:
+                    _json.dump(valid_segments, f, indent=2)
+                job.segments_path = segments_path
+                job.progress = 70
+                db.commit()
+                self.update_state(state="PROGRESS", meta={"progress": 70, "status": "cutting"})
+
+            # ---- Stage 4: Cutting -----------------------------------------
             job.status = JobStatus.CUTTING
             clips_job_dir = os.path.join(CLIPS_DIR, job_id)
             os.makedirs(clips_job_dir, exist_ok=True)
 
-            total_segments = len(valid_segments)
-            for i, seg in enumerate(valid_segments):
-                progress = 70 + int((i / total_segments) * 25)
+            # Build index of clips already fully cut (file on disk + DB row)
+            existing = {
+                c.clip_index
+                for c in db.query(Clip).filter(Clip.job_id == job_id).all()
+                if c.file_path and os.path.exists(c.file_path)
+            }
+            if existing:
+                print(f"[pipeline] RESUME — {len(existing)} clip(s) already cut: {sorted(existing)}")
+
+            pending_segments = [s for s in valid_segments if s["clip_index"] not in existing]
+            total_segments   = len(valid_segments)
+
+            for i, seg in enumerate(pending_segments):
+                done_so_far = len(existing) + i
+                progress = 70 + int((done_so_far / total_segments) * 25)
                 self.update_state(state="PROGRESS", meta={"progress": progress, "status": "cutting"})
 
                 start = seg["start_seconds"]
-                end = seg["end_seconds"]
+                end   = seg["end_seconds"]
 
                 # Snap to silence for clean cuts
                 start = find_nearest_silence(job.video_path, start, 1.5)
-                end = find_nearest_silence(job.video_path, end, 1.5)
+                end   = find_nearest_silence(job.video_path, end,   1.5)
 
                 # Ensure valid range after snapping
                 if end <= start:
@@ -166,8 +215,8 @@ def process_video(self, job_id: str):
                     end = min(start + 45, video_duration)
 
                 clip_filename = f"clip_{seg['clip_index']:02d}.mp4"
-                clip_path = os.path.join(clips_job_dir, clip_filename)
-                temp_path = os.path.join(clips_job_dir, f"temp_{seg['clip_index']:02d}.mp4")
+                clip_path     = os.path.join(clips_job_dir, clip_filename)
+                temp_path     = os.path.join(clips_job_dir, f"temp_{seg['clip_index']:02d}.mp4")
 
                 try:
                     cut_clip(job.video_path, temp_path, start, end)
@@ -186,34 +235,36 @@ def process_video(self, job_id: str):
                         hook=seg["hook"],
                         reason=seg["reason"],
                         file_path=clip_path,
-                        file_size=get_file_size(clip_path)
+                        file_size=get_file_size(clip_path),
                     )
                     db.add(clip)
                     db.commit()
                 except Exception as e:
-                    print(f"Warning: Failed to cut clip {seg['clip_index']}: {e}")
+                    print(f"[pipeline] Warning: failed to cut clip {seg['clip_index']}: {e}")
                     continue
 
-        # STEP 4: Completed
-        job.status = JobStatus.COMPLETED
-        job.progress = 100
+        # ------------------------------------------------------------------
+        # Done
+        # ------------------------------------------------------------------
+        job.status     = JobStatus.COMPLETED
+        job.progress   = 100
         job.clips_count = db.query(Clip).filter(Clip.job_id == job_id).count()
         db.commit()
         self.update_state(state="SUCCESS", meta={"progress": 100, "status": "completed"})
-        
+
     except Exception as e:
-        error_msg = str(e)
+        error_msg    = str(e)
         traceback_str = traceback.format_exc()
-        print(f"Pipeline error: {error_msg}\n{traceback_str}")
-        
+        print(f"[pipeline] error: {error_msg}\n{traceback_str}")
+
         if job:
-            job.status = JobStatus.FAILED
+            job.status        = JobStatus.FAILED
             job.error_message = error_msg
-            job.progress = 0
+            job.progress      = 0
             db.commit()
-        
+
         self.update_state(state="FAILURE", meta={"error": error_msg})
         raise self.retry(exc=e, countdown=5)
-    
+
     finally:
         db.close()
