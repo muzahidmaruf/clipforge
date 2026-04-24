@@ -25,23 +25,9 @@ const COMPONENTS = {
  * Responsive scale: we measure the container height and scale the 1080p
  * reference sizes so graphics look right at any player size.
  */
-export default function MotionLayer({ clipId, currentTime, primaryColor = '#FFD400', enabled = true }) {
-  const [cues, setCues] = useState([])
+export default function MotionLayer({ cues = [], currentTime, primaryColor = '#FFD400', enabled = true }) {
   const [scale, setScale] = useState(0.5)
   const wrapRef = useRef(null)
-
-  // Fetch cues
-  useEffect(() => {
-    if (!enabled) return
-    let cancelled = false
-    fetch(`/api/clips/${clipId}/motion`)
-      .then((r) => (r.ok ? r.json() : { cues: [] }))
-      .then((d) => {
-        if (!cancelled) setCues(d.cues || [])
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [clipId, enabled])
 
   // Track container height for responsive scaling (1920 = scale 1)
   useEffect(() => {

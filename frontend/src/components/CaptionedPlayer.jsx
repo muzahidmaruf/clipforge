@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Settings2 } from 'lucide-react'
 import { streamClip } from '../api/client'
 import MotionLayer from './motion/MotionLayer'
+import { activeTreatments, matchTreatment, applyTreatment } from './motion/wordTreatments'
 
 // Cache fonts globally so all cards share one fetch
 let fontsCache = null
@@ -159,6 +160,7 @@ export default function CaptionedPlayer({ clip }) {
   const [currentTime, setCurrentTime] = useState(0)
   const [words, setWords] = useState(null)
   const [effects, setEffects] = useState([])
+  const [motionCues, setMotionCues] = useState([])
   const [error, setError] = useState(null)
   const [fonts, setFonts] = useState([])
 
@@ -214,6 +216,18 @@ export default function CaptionedPlayer({ clip }) {
     return () => { cancelled = true }
   }, [clip.id])
 
+  // Fetch AI-directed motion cues (full-screen components + word treatments)
+  useEffect(() => {
+    let cancelled = false
+    fetch(`/api/clips/${clip.id}/motion`)
+      .then((r) => (r.ok ? r.json() : { cues: [] }))
+      .then((data) => {
+        if (!cancelled) setMotionCues(data.cues || [])
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [clip.id])
+
   // Fetch font list
   useEffect(() => {
     let cancelled = false
@@ -254,6 +268,9 @@ export default function CaptionedPlayer({ clip }) {
     }
   }
   const activePhrase = phrases.find((p) => currentTime >= p.start && currentTime <= p.end)
+
+  // Build active word-treatment map for the current frame
+  const treatmentMap = motionOn ? activeTreatments(motionCues, currentTime) : new Map()
 
   if (error) {
     return (
@@ -369,7 +386,7 @@ export default function CaptionedPlayer({ clip }) {
 
       {/* AI-directed motion graphics layer (lower-thirds, stat cards, pull quotes) */}
       <MotionLayer
-        clipId={clip.id}
+        cues={motionCues}
         currentTime={currentTime}
         primaryColor={primary}
         enabled={motionOn}
@@ -401,20 +418,36 @@ export default function CaptionedPlayer({ clip }) {
           >
             {activePhrase.words.map((w, idx) => {
               const isActive = currentTime >= w.start && currentTime <= w.end
+              const baseStyle = wordStyle({
+                word: w,
+                currentTime,
+                isActive,
+                fontFamily,
+                fontSize,
+                primary,
+                secondary,
+                animation,
+              })
+              const match = treatmentMap.size
+                ? matchTreatment(treatmentMap, w.word, w.start)
+                : null
+              const treated = match
+                ? applyTreatment(match.treatment, match.progress, primary)
+                : null
+              // Merge treatment style over base, but preserve the treatment's
+              // transform if provided (otherwise keep base transform).
+              const mergedStyle = treated
+                ? {
+                    ...baseStyle,
+                    ...treated.style,
+                    position: 'relative',
+                  }
+                : baseStyle
               return (
-                <span
-                  key={idx}
-                  style={wordStyle({
-                    word: w,
-                    currentTime,
-                    isActive,
-                    fontFamily,
-                    fontSize,
-                    primary,
-                    secondary,
-                    animation,
-                  })}
-                >
+                <span key={idx} style={mergedStyle}>
+                  {treated?.decorators?.map((d) => (
+                    <span key={d.key} style={d.style} aria-hidden="true" />
+                  ))}
                   {w.word}
                 </span>
               )

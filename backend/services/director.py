@@ -28,15 +28,65 @@ SUPPORTED_TYPES = {
     "progress_bar",
     "bar_chart",
     "confetti",
+    "word_treatment",
 }
 
-DIRECTOR_PROMPT = """You are a senior motion graphics designer working on a short-form video (TikTok / Reels / Shorts). Your job is to read the word-level transcript below and plan a TIMELINE of on-screen motion graphics that make this clip feel designed, not raw.
+# All treatments the frontend can render for word_treatment cues.
+WORD_TREATMENTS = {
+    "highlight",      # yellow highlighter swipes L→R behind the word
+    "scale_pop",      # scales to 2.2x then settles to 1.1x
+    "shake",          # rapid horizontal tremor
+    "strikethrough",  # line draws through (for negation/deletion)
+    "glow_pulse",     # text-shadow pulses primary color
+    "color_flash",    # word flashes primary color then returns
+    "stamp",          # rotates in like a rubber stamp
+    "drop",           # drops down from above landing with impact
+    "rise",           # rises up like being pulled
+    "underline_draw", # dotted underline animates L→R
+    "blur_reveal",    # starts blurred + transparent, sharpens into focus
+    "chromatic",      # RGB split glitch effect
+}
 
-You have SEVEN component types available. Use them sparingly — quality over quantity. A 60-second clip should have 4 to 7 cues total, never more than one graphic on screen at a time, and at least 2.5 seconds of breathing room between cues.
+DIRECTOR_PROMPT = """You are a senior motion graphics designer working on a short-form video (TikTok / Reels / Shorts). Your job is to read the word-level transcript and choreograph BOTH (a) per-word visual treatments that make specific spoken words pop dramatically, and (b) occasional full-screen motion graphics for peak moments.
+
+The caption track is always visible. Your primary tool is WORD TREATMENTS — you pick specific individual words in the transcript and give each one a custom visual treatment that triggers exactly when that word is spoken. This is what makes the video feel DESIGNED, like Submagic or Opus Clip. Aim for 6 to 14 word treatments across a 60-second clip — roughly one every 4-7 seconds.
+
+Additionally, use 1 to 3 full-screen components (pull_quote, kinetic_slam, confetti, etc.) ONLY for peak moments where a whole caption take-over is justified.
 
 ---
 
-COMPONENTS:
+WORD TREATMENTS (your PRIMARY tool):
+
+Each cue takes the form:
+`{{"t": <exact timestamp in seconds>, "type": "word_treatment", "word": "<exact word from transcript>", "treatment": "<one of the treatment names>"}}`
+
+The `word` must appear verbatim in the transcript at approximately time `t` (within ±0.5s). You may include punctuation if that's how it appears.
+
+Available treatments (pick the one that matches the emotional beat of the word):
+
+- **highlight** — yellow highlighter swipes behind the word. Use for KEY CONCEPTS the viewer must remember.
+- **scale_pop** — word scales to 2.2× and settles at 1.1×. Use for BIG, EMPHATIC words ("HUGE", "MASSIVE", "NEVER").
+- **shake** — rapid horizontal tremor. Use for INTENSITY / ANGER / URGENCY words ("crashed", "exploded", "RIGHT NOW").
+- **strikethrough** — line draws through the word. Use for NEGATION or CORRECTIONS ("wrong", "not", "never").
+- **glow_pulse** — primary-color glow pulses around the word. Use for MAGIC / SPECIAL / REVEAL words ("secret", "hidden", "truth").
+- **color_flash** — word flashes the primary color. Use for IMPORTANT but not loud words — a subtle accent.
+- **stamp** — word rotates in like a rubber stamp. Use for VERDICTS / LABELS ("approved", "rejected", "proven", "fake").
+- **drop** — word drops from above with impact. Use for CONCLUSIONS / ENDINGS / FINAL POINTS ("done", "that's it", "end").
+- **rise** — word floats up. Use for UPLIFTING words ("grew", "soared", "hope", "rise").
+- **underline_draw** — dotted underline animates L→R under the word. Use for DEFINITIONS / TERMS introduced by the speaker.
+- **blur_reveal** — word starts blurred and snaps into focus. Use for REVEAL / INSIGHT moments ("realize", "discover", "actually").
+- **chromatic** — RGB-split glitch effect. Use for GLITCHY / UNSETTLING / SURREAL words ("crazy", "insane", "mind-bending").
+
+GOOD EXAMPLES:
+- When the speaker says "dopamine is not the pleasure chemical" → treatment on "not" (strikethrough)
+- When the speaker says "80% of decisions are SUBCONSCIOUS" → treatment on "subconscious" (scale_pop)
+- When the speaker says "here's the secret" → treatment on "secret" (glow_pulse)
+- When the speaker says "they CRASHED the market" → treatment on "crashed" (shake)
+- When the speaker says "you're wrong" → treatment on "wrong" (strikethrough)
+
+---
+
+FULL-SCREEN COMPONENTS (use sparingly, max 3 per clip, at least 4 seconds apart):
 
 1. **lower_third** — animated name/title strip. Use ONCE at the START only if the transcript clearly identifies a speaker (name + role). Do NOT invent names.
    Fields: `title` (name, uppercase), `sub` (role, title case, max 40 chars)
@@ -98,13 +148,19 @@ CLIP DURATION: {duration} seconds
 OUTPUT:
 Respond with ONLY a valid JSON array. No prose, no markdown, no code fences.
 
-Example:
+Example of a well-directed 45s clip (mostly word treatments, one peak moment):
 [
-  {{"t": 1.2, "type": "lower_third", "title": "DR. ANDREW HUBERMAN", "sub": "Neuroscientist, Stanford"}},
-  {{"t": 14.0, "type": "bullet_cascade", "title": "Three Pillars", "items": ["Attention", "Memory", "Emotion"]}},
-  {{"t": 24.8, "type": "progress_bar", "label": "Habits form within 66 days", "value": 90}},
-  {{"t": 38.5, "type": "kinetic_slam", "words": ["THIS", "CHANGES", "EVERYTHING"]}},
-  {{"t": 48.0, "type": "pull_quote", "text": "Your brain rewires while you sleep."}}
+  {{"t": 2.4, "type": "word_treatment", "word": "secretly", "treatment": "glow_pulse"}},
+  {{"t": 5.8, "type": "word_treatment", "word": "80%", "treatment": "scale_pop"}},
+  {{"t": 8.2, "type": "word_treatment", "word": "subconscious", "treatment": "highlight"}},
+  {{"t": 12.0, "type": "word_treatment", "word": "not", "treatment": "strikethrough"}},
+  {{"t": 12.6, "type": "word_treatment", "word": "pleasure", "treatment": "strikethrough"}},
+  {{"t": 15.1, "type": "word_treatment", "word": "prediction", "treatment": "scale_pop"}},
+  {{"t": 19.3, "type": "word_treatment", "word": "realize", "treatment": "blur_reveal"}},
+  {{"t": 22.5, "type": "word_treatment", "word": "crashed", "treatment": "shake"}},
+  {{"t": 26.0, "type": "word_treatment", "word": "wrong", "treatment": "stamp"}},
+  {{"t": 30.2, "type": "pull_quote", "text": "The anticipation is the high."}},
+  {{"t": 38.5, "type": "word_treatment", "word": "everything", "treatment": "drop"}}
 ]"""
 
 
@@ -242,6 +298,15 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
             return None
         return {"t": round(t, 2), "type": cue_type, "label": label, "value": value}
 
+    if cue_type == "word_treatment":
+        word = str(cue.get("word", "")).strip()
+        treatment = str(cue.get("treatment", "")).strip().lower()
+        if not word or len(word) > 24:
+            return None
+        if treatment not in WORD_TREATMENTS:
+            return None
+        return {"t": round(t, 2), "type": cue_type, "word": word, "treatment": treatment}
+
     if cue_type == "confetti":
         intensity = str(cue.get("intensity", "medium")).strip().lower()
         if intensity not in ("low", "medium", "high"):
@@ -276,21 +341,30 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
 
 
 def _dedupe_and_space(cues: list, min_gap: float = 2.5) -> list:
-    """Order by time, enforce gap, allow only one of each singleton type per clip."""
+    """Order by time. Word treatments flow freely; full-screen cues need spacing.
+    Singleton types are capped at one per clip."""
     cues = sorted(cues, key=lambda c: c["t"])
     kept = []
     seen_singletons = set()
-    last_t = -999.0
+    last_fullscreen_t = -999.0
     SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam", "confetti"}
+
     for c in cues:
-        if c["t"] - last_t < min_gap:
+        if c["type"] == "word_treatment":
+            # Word treatments don't need spacing — but enforce one treatment per word-time
+            kept.append(c)
+            continue
+
+        # Full-screen component — enforce gap and singleton rule
+        if c["t"] - last_fullscreen_t < min_gap:
             continue
         if c["type"] in SINGLETONS:
             if c["type"] in seen_singletons:
                 continue
             seen_singletons.add(c["type"])
         kept.append(c)
-        last_t = c["t"]
+        last_fullscreen_t = c["t"]
+
     return kept
 
 
