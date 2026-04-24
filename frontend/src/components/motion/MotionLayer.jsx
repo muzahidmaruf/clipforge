@@ -6,6 +6,7 @@ import KineticSlam from './KineticSlam'
 import BulletCascade from './BulletCascade'
 import ProgressBar from './ProgressBar'
 import BarChart from './BarChart'
+import ConfettiBurst from './ConfettiBurst'
 
 const COMPONENTS = {
   lower_third: LowerThird,
@@ -15,6 +16,7 @@ const COMPONENTS = {
   bullet_cascade: BulletCascade,
   progress_bar: ProgressBar,
   bar_chart: BarChart,
+  confetti: ConfettiBurst,
 }
 
 /**

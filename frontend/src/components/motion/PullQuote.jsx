@@ -39,12 +39,49 @@ export default function PullQuote({ cue, currentTime, primaryColor = '#FFD400', 
   const textY = phase === 'out' ? -outP * 12 : (1 - easeOutCubic(textT)) * 18
   const textOpacity = phase === 'out' ? 1 - outP : easeOutCubic(textT)
 
+  // Animated backdrop: dark radial vignette + slow-rotating colored gradient
+  // for a cinematic cross-light feel. Angle advances over time.
+  const elapsed = Math.max(0, currentTime - cue.t)
+  const angle = (elapsed * 12) % 360 // slow 30s revolution
+  const hint = `${primaryColor}22` // 13% alpha tint
+
   const backdropStyle = {
     position: 'absolute',
     inset: 0,
-    background: 'radial-gradient(ellipse at center, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.55) 70%, rgba(0,0,0,0.35) 100%)',
+    background: `
+      radial-gradient(ellipse at center, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.55) 65%, rgba(0,0,0,0.3) 100%),
+      conic-gradient(from ${angle}deg at 50% 50%, ${hint}, transparent 25%, ${hint} 50%, transparent 75%, ${hint})
+    `,
     opacity: dimOpacity,
     pointerEvents: 'none',
+    transition: 'none',
+  }
+
+  // Two slow-drifting light orbs behind the text for depth
+  const orbT = elapsed * 0.5
+  const orb1Style = {
+    position: 'absolute',
+    left: `${35 + Math.sin(orbT) * 8}%`,
+    top: `${30 + Math.cos(orbT * 0.7) * 6}%`,
+    width: '40%',
+    height: '40%',
+    borderRadius: '50%',
+    background: `radial-gradient(circle at center, ${primaryColor}26 0%, transparent 60%)`,
+    opacity: dimOpacity * 1.2,
+    pointerEvents: 'none',
+    filter: 'blur(30px)',
+  }
+  const orb2Style = {
+    position: 'absolute',
+    right: `${25 + Math.cos(orbT * 0.9) * 8}%`,
+    bottom: `${30 + Math.sin(orbT * 1.2) * 6}%`,
+    width: '45%',
+    height: '45%',
+    borderRadius: '50%',
+    background: `radial-gradient(circle at center, rgba(255,255,255,0.14) 0%, transparent 60%)`,
+    opacity: dimOpacity * 1.1,
+    pointerEvents: 'none',
+    filter: 'blur(40px)',
   }
 
   const wrapStyle = {
@@ -100,6 +137,8 @@ export default function PullQuote({ cue, currentTime, primaryColor = '#FFD400', 
   return (
     <>
       <div style={backdropStyle} />
+      <div style={orb1Style} />
+      <div style={orb2Style} />
       <div style={wrapStyle}>
         <div style={markStyle}>“</div>
         <div style={quoteStyle}>{cue.text}</div>

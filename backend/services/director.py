@@ -27,6 +27,7 @@ SUPPORTED_TYPES = {
     "bullet_cascade",
     "progress_bar",
     "bar_chart",
+    "confetti",
 }
 
 DIRECTOR_PROMPT = """You are a senior motion graphics designer working on a short-form video (TikTok / Reels / Shorts). Your job is to read the word-level transcript below and plan a TIMELINE of on-screen motion graphics that make this clip feel designed, not raw.
@@ -58,6 +59,9 @@ COMPONENTS:
 7. **bar_chart** — 2–4 labeled horizontal bars growing to proportional lengths. Use ONLY when the speaker compares multiple concrete numeric values (e.g. "sales went from 40 to 68 to 120"). All values must be real numbers from the transcript.
    Fields: `title` (optional short header, max 30 chars), `bars` (array of 2–4 objects: `{{label: string max 14 chars, value: number}}`)
 
+8. **confetti** — particle celebration burst. Use ONCE per clip, ONLY for a genuine win/celebration/breakthrough/achievement moment (e.g. "finally got it", "we did it", "hit a million", "success", "after years of struggle"). Do NOT use for generic positive vibes.
+   Fields: `intensity` ("low" | "medium" | "high") — `high` for huge wins, `low` for smaller positive beats
+
 ---
 
 TIMING RULES:
@@ -78,6 +82,7 @@ SELECTION RULES (critical):
 - No actual enumerated list? → NO `bullet_cascade`.
 - No percentage? → NO `progress_bar`.
 - No compared numeric values? → NO `bar_chart`.
+- No genuine win/celebration moment? → NO `confetti`.
 - It is perfectly fine to return an empty array. Plain is better than forced or fake.
 - NEVER invent numbers, names, or facts. Everything must come from the transcript.
 
@@ -237,6 +242,12 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
             return None
         return {"t": round(t, 2), "type": cue_type, "label": label, "value": value}
 
+    if cue_type == "confetti":
+        intensity = str(cue.get("intensity", "medium")).strip().lower()
+        if intensity not in ("low", "medium", "high"):
+            intensity = "medium"
+        return {"t": round(t, 2), "type": cue_type, "intensity": intensity}
+
     if cue_type == "bar_chart":
         bars = cue.get("bars")
         if not isinstance(bars, list) or not (2 <= len(bars) <= 4):
@@ -270,7 +281,7 @@ def _dedupe_and_space(cues: list, min_gap: float = 2.5) -> list:
     kept = []
     seen_singletons = set()
     last_t = -999.0
-    SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam"}
+    SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam", "confetti"}
     for c in cues:
         if c["t"] - last_t < min_gap:
             continue

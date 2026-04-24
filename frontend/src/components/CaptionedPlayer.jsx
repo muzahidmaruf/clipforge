@@ -172,7 +172,18 @@ export default function CaptionedPlayer({ clip }) {
   const [animation, setAnimation] = useState(() => readPref('cf_anim', 'pop'))
   const [effectsOn, setEffectsOn] = useState(() => readPref('cf_fx', 'true') === 'true')
   const [motionOn, setMotionOn] = useState(() => readPref('cf_motion', 'true') === 'true')
+  const [kenBurnsOn, setKenBurnsOn] = useState(() => readPref('cf_kb', 'true') === 'true')
   const [showSettings, setShowSettings] = useState(false)
+
+  // Ken Burns: pick a deterministic direction per clip so it never changes mid-view
+  const kenBurns = (() => {
+    // Seeded by clip id so it's stable across mounts
+    let hash = 0
+    for (let i = 0; i < clip.id.length; i++) hash = (hash * 31 + clip.id.charCodeAt(i)) >>> 0
+    const variant = hash % 4
+    // 0: zoom-in center, 1: zoom-in drifting right, 2: zoom-in drifting left, 3: zoom-in drifting up
+    return { variant, seed: hash }
+  })()
 
   // Fetch subtitles
   useEffect(() => {
@@ -263,16 +274,35 @@ export default function CaptionedPlayer({ clip }) {
     ? effects.find((e) => e.type === 'punch' && currentTime >= e.start && currentTime <= e.end)
     : null
 
-  // Video "punch": subtle scale + tiny shake when an emphasized word hits
-  let videoTransform = 'scale(1)'
+  // Ken Burns: slow linear zoom + pan across the whole clip.
+  // Progress derived from currentTime / videoDuration; duration comes from metadata.
+  const kbDuration = videoRef.current?.duration || clip.duration || 60
+  let kbScale = 1
+  let kbTx = 0
+  let kbTy = 0
+  if (kenBurnsOn) {
+    const kbT = Math.min(1, Math.max(0, currentTime / Math.max(1, kbDuration)))
+    // 1.00 → 1.08 zoom across the whole clip
+    kbScale = 1 + kbT * 0.08
+    // Pan direction depends on variant (px drift — object-contain means the video fits, so transform is subtle)
+    const drift = 30 // px at peak
+    if (kenBurns.variant === 1) kbTx = (kbT - 0.5) * drift * 2      // left → right
+    else if (kenBurns.variant === 2) kbTx = -(kbT - 0.5) * drift * 2 // right → left
+    else if (kenBurns.variant === 3) kbTy = -(kbT - 0.5) * drift     // down → up
+    // variant 0 = straight zoom
+  }
+
+  // Video "punch": subtle scale + tiny shake layered ON TOP of Ken Burns
+  let punchScale = 1
+  let punchTx = 0
   if (activePunch) {
     const t = (currentTime - activePunch.start) / Math.max(0.001, activePunch.end - activePunch.start)
-    // Ease in then ease out (bell curve 0→1→0)
     const bell = 1 - Math.abs(2 * t - 1)
-    const scale = 1 + (activePunch.intensity - 1) * bell
-    const shake = Math.sin(t * Math.PI * 6) * 4 * bell
-    videoTransform = `scale(${scale.toFixed(3)}) translateX(${shake.toFixed(2)}px)`
+    punchScale = 1 + (activePunch.intensity - 1) * bell
+    punchTx = Math.sin(t * Math.PI * 6) * 4 * bell
   }
+
+  const videoTransform = `translate(${(kbTx + punchTx).toFixed(2)}px, ${kbTy.toFixed(2)}px) scale(${(kbScale * punchScale).toFixed(4)})`
 
   const savePref = (setter, key) => (v) => {
     setter(v)
@@ -557,6 +587,20 @@ export default function CaptionedPlayer({ clip }) {
               }`}
             >
               {motionOn ? 'Lower thirds / stat cards / quotes: ON' : 'Motion graphics: OFF'}
+            </button>
+          </div>
+
+          <div>
+            <label className="block text-gray-400 mb-1">Ken Burns (cinematic pan)</label>
+            <button
+              onClick={() => savePref(setKenBurnsOn, 'cf_kb')(!kenBurnsOn)}
+              className={`w-full py-1 rounded border text-xs ${
+                kenBurnsOn
+                  ? 'bg-accent text-white border-accent'
+                  : 'bg-background text-gray-300 border-border'
+              }`}
+            >
+              {kenBurnsOn ? 'Slow zoom + pan: ON' : 'Ken Burns: OFF'}
             </button>
           </div>
         </div>
