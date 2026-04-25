@@ -2,6 +2,7 @@ import os
 import uuid
 import shutil
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Form
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from database import get_db, Job, JobStatus
@@ -109,4 +110,80 @@ async def upload_video(
         "job_id": job_id,
         "status": "pending",
         "message": "Video uploaded and processing started"
+    }
+
+
+# ---------------------------------------------------------------------------
+# YouTube import
+# ---------------------------------------------------------------------------
+
+class YouTubeImportRequest(BaseModel):
+    url: str
+    whisper_model: str = "base"
+    whisper_language: str = "auto"
+    ai_model: str = "qwen3.5:32b-cloud"
+    mode: str = "clips"
+    num_clips: int = 5
+
+
+@router.post("/import-youtube")
+async def import_youtube(body: YouTubeImportRequest, db: Session = Depends(get_db)):
+    """Download a YouTube video with yt-dlp and start processing."""
+    from services.youtube import download_youtube
+    from services.transcription import SUPPORTED_LANGUAGES
+
+    # Basic URL check
+    url = body.url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(400, detail="Invalid URL")
+
+    # Validate params
+    valid_whisper = {"tiny", "base", "small", "medium", "large"}
+    whisper_model = body.whisper_model if body.whisper_model in valid_whisper else "base"
+    whisper_language = (body.whisper_language or "auto").strip().lower()
+    if whisper_language not in SUPPORTED_LANGUAGES:
+        whisper_language = "auto"
+    mode = (body.mode or "clips").lower()
+    if mode not in {"clips", "clean", "both"}:
+        mode = "clips"
+    num_clips = max(1, min(15, int(body.num_clips or 5)))
+
+    job_id = str(uuid.uuid4())
+    try:
+        info = download_youtube(url, job_id=job_id)
+    except Exception as e:
+        raise HTTPException(400, detail=f"YouTube download failed: {e}")
+
+    # Duration check
+    if info["duration"] and info["duration"] > MAX_VIDEO_DURATION_MINUTES * 60:
+        try:
+            os.remove(info["file_path"])
+        except OSError:
+            pass
+        raise HTTPException(400, detail=f"Video too long. Max: {MAX_VIDEO_DURATION_MINUTES} minutes")
+
+    job = Job(
+        id=job_id,
+        filename=info["filename"],
+        status=JobStatus.PENDING,
+        video_path=info["file_path"],
+        whisper_model=whisper_model,
+        whisper_language=whisper_language,
+        ai_model=body.ai_model or "qwen3.5:32b-cloud",
+        mode=mode,
+        num_clips=num_clips,
+    )
+    db.add(job)
+    db.commit()
+
+    task = process_video.delay(job_id)
+    job.celery_task_id = task.id
+    db.commit()
+
+    return {
+        "job_id": job_id,
+        "status": "pending",
+        "message": f"YouTube video '{info['title']}' downloaded and processing started",
+        "title": info["title"],
+        "duration": info["duration"],
     }

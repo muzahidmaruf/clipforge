@@ -28,6 +28,22 @@ export const uploadVideo = (
   })
 }
 
+export const importYouTube = (
+  url,
+  whisperModel,
+  aiModel,
+  { mode = 'clips', numClips = 5, whisperLanguage = 'auto' } = {}
+) => api.post('/import-youtube', {
+  url,
+  whisper_model: whisperModel || 'base',
+  whisper_language: whisperLanguage || 'auto',
+  ai_model: aiModel || 'qwen3.5:32b-cloud',
+  mode,
+  num_clips: numClips,
+})
+
+export const burnSubtitles = (clipId, opts = {}) => api.post(`/clips/${clipId}/burn-subtitles`, opts, { responseType: 'blob', timeout: 300000 })
+
 export const streamCleanedVideo = (jobId) => `/api/jobs/${jobId}/cleaned/stream`
 export const downloadCleanedVideo = (jobId) => `/api/jobs/${jobId}/cleaned/download`
 

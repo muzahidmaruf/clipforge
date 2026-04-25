@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Scissors, ChevronDown, Sparkles, Wand2, Layers } from 'lucide-react'
+import { Scissors, ChevronDown, Sparkles, Wand2, Layers, Upload, Youtube, Link } from 'lucide-react'
 import UploadZone from '../components/UploadZone'
 import JobList from '../components/JobList'
-import { uploadVideo } from '../api/client'
+import { uploadVideo, importYouTube } from '../api/client'
 
 const WHISPER_MODELS = [
   { value: 'tiny',   label: 'Tiny (fastest, lowest quality)' },
@@ -45,7 +45,9 @@ const AI_MODELS = [
 ]
 
 export default function Home() {
+  const [inputMode, setInputMode] = useState('file')   // 'file' | 'youtube'
   const [file, setFile] = useState(null)
+  const [youtubeUrl, setYoutubeUrl] = useState('')
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState(null)
@@ -57,23 +59,30 @@ export default function Home() {
   const [whisperLanguage, setWhisperLanguage] = useState('auto')  // ISO 639-1 or 'auto'
   const navigate = useNavigate()
 
+  const hasInput = inputMode === 'file' ? !!file : youtubeUrl.trim().length > 0
+
   const handleFileSelect = (selectedFile) => {
     setFile(selectedFile)
     setError(null)
   }
 
   const handleUpload = async () => {
-    if (!file) return
+    if (!hasInput) return
     setUploading(true)
     setUploadProgress(0)
     setError(null)
 
     try {
-      const response = await uploadVideo(file, whisperModel, aiModel, setUploadProgress, { mode, numClips, whisperLanguage })
+      let response
+      if (inputMode === 'youtube') {
+        response = await importYouTube(youtubeUrl.trim(), whisperModel, aiModel, { mode, numClips, whisperLanguage })
+      } else {
+        response = await uploadVideo(file, whisperModel, aiModel, setUploadProgress, { mode, numClips, whisperLanguage })
+      }
       const { job_id } = response.data
       navigate(`/results/${job_id}`)
     } catch (err) {
-      let msg = 'Upload failed. Please try again.'
+      let msg = inputMode === 'youtube' ? 'YouTube import failed.' : 'Upload failed. Please try again.'
       if (err.response?.data?.detail) {
         msg = err.response.data.detail
       } else if (err.message?.includes('Network Error')) {
@@ -100,10 +109,48 @@ export default function Home() {
           </p>
         </div>
 
-        {/* Upload */}
-        <UploadZone onFileSelect={handleFileSelect} disabled={uploading} />
+        {/* Input mode toggle */}
+        <div className="flex rounded-xl border border-border overflow-hidden mb-4">
+          <button
+            onClick={() => { setInputMode('file'); setError(null) }}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
+              inputMode === 'file'
+                ? 'bg-accent text-white'
+                : 'bg-card text-gray-400 hover:text-white'
+            }`}
+          >
+            <Upload className="w-4 h-4" /> Upload File
+          </button>
+          <button
+            onClick={() => { setInputMode('youtube'); setError(null) }}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-sm font-medium transition-colors ${
+              inputMode === 'youtube'
+                ? 'bg-accent text-white'
+                : 'bg-card text-gray-400 hover:text-white'
+            }`}
+          >
+            <Youtube className="w-4 h-4" /> YouTube URL
+          </button>
+        </div>
 
-        {file && (
+        {/* Upload or URL input */}
+        {inputMode === 'file' ? (
+          <UploadZone onFileSelect={handleFileSelect} disabled={uploading} />
+        ) : (
+          <div className="flex items-center gap-2 p-4 bg-card border border-border rounded-2xl">
+            <Link className="w-5 h-5 text-gray-500 shrink-0" />
+            <input
+              type="url"
+              placeholder="https://www.youtube.com/watch?v=..."
+              value={youtubeUrl}
+              onChange={(e) => { setYoutubeUrl(e.target.value); setError(null) }}
+              disabled={uploading}
+              className="flex-1 bg-transparent text-white text-sm placeholder-gray-600 focus:outline-none"
+            />
+          </div>
+        )}
+
+        {hasInput && (
           <>
             {/* Mode selector */}
             <div className="mt-5 p-4 bg-card border border-border rounded-xl">
@@ -225,7 +272,7 @@ export default function Home() {
               </div>
             )}
 
-            {uploading && (
+            {uploading && inputMode === 'file' && (
               <div className="mt-4 mb-2">
                 <div className="h-2 bg-card rounded-full overflow-hidden">
                   <div
@@ -236,13 +283,18 @@ export default function Home() {
                 <p className="text-sm text-gray-500 mt-1">Uploading: {uploadProgress}%</p>
               </div>
             )}
+            {uploading && inputMode === 'youtube' && (
+              <div className="mt-4 mb-2">
+                <p className="text-sm text-gray-500 animate-pulse">⬇️ Downloading from YouTube…</p>
+              </div>
+            )}
             <button
               onClick={handleUpload}
               disabled={uploading}
               className="mt-4 w-full py-4 bg-accent hover:bg-accent-hover disabled:bg-accent/50 text-white font-semibold rounded-2xl transition-colors"
             >
               {uploading
-                ? 'Uploading...'
+                ? (inputMode === 'youtube' ? 'Downloading…' : 'Uploading...')
                 : mode === 'clean'
                   ? 'Clean Video'
                   : mode === 'both'

@@ -4,8 +4,10 @@ import json
 import random
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from typing import Optional
 
-from config import TRANSCRIPTS_DIR
+from config import TRANSCRIPTS_DIR, CLIPS_DIR
 from utils.time_utils import parse_timestamp
 from services.director import generate_motion
 
@@ -267,5 +269,90 @@ def get_clip_motion(clip_id: str, refresh: bool = False):
             "duration": round(duration, 3),
             "cues": cues,
         }
+    finally:
+        db.close()
+
+
+# ---------------------------------------------------------------------------
+# Subtitle burn endpoint
+# ---------------------------------------------------------------------------
+
+class SubtitleOptions(BaseModel):
+    alignment: str = "bottom"
+    fontsize: int = 16
+    font_name: str = "Verdana"
+    font_color: str = "#FFFFFF"
+    border_color: str = "#000000"
+    border_width: int = 2
+    bg_color: str = "#000000"
+    bg_opacity: float = 0.0
+    max_chars: int = 20
+    max_duration: float = 2.0
+
+
+@router.post("/clips/{clip_id}/burn-subtitles")
+def burn_clip_subtitles(clip_id: str, opts: Optional[SubtitleOptions] = None):
+    """
+    Burn subtitles into the clip video and return the captioned file.
+
+    The output is saved as `clip_NN_subtitled.mp4` next to the original.
+    Subsequent calls with the same options return the cached file.
+    """
+    from database import SessionLocal, Clip
+    from services.subtitles import generate_and_burn
+
+    db = SessionLocal()
+    try:
+        clip = db.query(Clip).filter(Clip.id == clip_id).first()
+        if not clip or not os.path.exists(clip.file_path):
+            raise HTTPException(404, detail="Clip not found")
+
+        transcript_path = os.path.join(TRANSCRIPTS_DIR, f"{clip.job_id}.json")
+        if not os.path.exists(transcript_path):
+            raise HTTPException(404, detail="Transcript not found — cannot generate subtitles")
+
+        with open(transcript_path, "r", encoding="utf-8") as f:
+            transcript = json.load(f)
+
+        clip_start = parse_timestamp(clip.start_time)
+        clip_end   = parse_timestamp(clip.end_time)
+
+        out_path = clip.file_path.replace(".mp4", "_subtitled.mp4")
+        options  = opts.dict() if opts else {}
+
+        try:
+            generate_and_burn(
+                clip_video_path=clip.file_path,
+                transcript=transcript,
+                clip_start_seconds=clip_start,
+                clip_end_seconds=clip_end,
+                output_path=out_path,
+                subtitle_options=options,
+            )
+        except Exception as e:
+            raise HTTPException(500, detail=f"Subtitle burn failed: {e}")
+
+        return FileResponse(
+            out_path,
+            media_type="video/mp4",
+            filename=clip.filename.replace(".mp4", "_subtitled.mp4"),
+        )
+    finally:
+        db.close()
+
+
+@router.get("/clips/{clip_id}/burn-subtitles/status")
+def subtitled_clip_status(clip_id: str):
+    """Check if a subtitled version of this clip already exists."""
+    from database import SessionLocal, Clip
+
+    db = SessionLocal()
+    try:
+        clip = db.query(Clip).filter(Clip.id == clip_id).first()
+        if not clip:
+            raise HTTPException(404, detail="Clip not found")
+
+        out_path = clip.file_path.replace(".mp4", "_subtitled.mp4")
+        return {"clip_id": clip_id, "ready": os.path.exists(out_path)}
     finally:
         db.close()

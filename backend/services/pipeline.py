@@ -176,7 +176,12 @@ def process_video(self, job_id: str):
                 db.commit()
                 self.update_state(state="PROGRESS", meta={"progress": job.progress, "status": "analyzing"})
 
-                segments       = analyze_transcript(transcript_text, duration_str, ai_model, num_clips=num_clips)
+                segments       = analyze_transcript(
+                    transcript_text, duration_str, ai_model,
+                    num_clips=num_clips,
+                    transcript_result=transcript_result,
+                    video_duration_seconds=video_duration,
+                )
                 valid_segments = validate_segments(segments, video_duration)
 
                 if not valid_segments:
@@ -253,6 +258,10 @@ def process_video(self, job_id: str):
                         reason=seg["reason"],
                         file_path=clip_path,
                         file_size=get_file_size(clip_path),
+                        viral_hook_text=seg.get("viral_hook_text", ""),
+                        tiktok_description=seg.get("tiktok_description", ""),
+                        instagram_description=seg.get("instagram_description", ""),
+                        youtube_title=seg.get("youtube_title", ""),
                     )
                     db.add(clip)
                     db.commit()

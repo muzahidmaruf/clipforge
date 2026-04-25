@@ -80,16 +80,29 @@ def cut_clip(input_path: str, output_path: str, start_seconds: float, end_second
     
     return output_path
 
-def reframe_to_vertical(input_path: str, output_path: str) -> str:
-    """Reframe landscape video to 9:16 vertical"""
+def reframe_to_vertical(input_path: str, output_path: str, use_face_tracking: bool = True) -> str:
+    """Reframe landscape video to 9:16 vertical.
+
+    When use_face_tracking=True (default) tries AI face-tracking crop first.
+    Falls back to centre crop if face_tracker deps are not installed.
+    """
     width, height, _ = get_video_info(input_path)
-    
+
     if not is_landscape(width, height):
         # Already vertical or square, just copy
         os.rename(input_path, output_path)
         return output_path
-    
-    # Crop to 9:16 centered
+
+    if use_face_tracking:
+        try:
+            from services.face_tracker import reframe_with_face_tracking
+            return reframe_with_face_tracking(input_path, output_path)
+        except ImportError:
+            print("[video_processor] face_tracker deps not installed, falling back to centre crop")
+        except Exception as e:
+            print(f"[video_processor] face_tracker failed ({e}), falling back to centre crop")
+
+    # Centre crop fallback
     cmd = [
         FFMPEG_PATH, "-y",
         "-i", input_path,
@@ -101,11 +114,11 @@ def reframe_to_vertical(input_path: str, output_path: str) -> str:
         "-movflags", "+faststart",
         output_path
     ]
-    
+
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError(f"FFmpeg reframe error: {result.stderr}")
-    
+
     return output_path
 
 def extract_thumbnail(video_path: str, output_path: str, time: float = 0.0):

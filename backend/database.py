@@ -69,6 +69,12 @@ class Clip(Base):
     file_size = Column(Integer, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
+    # OpenShorts-style social metadata from the AI model
+    viral_hook_text = Column(Text, nullable=True)        # short punchy overlay text
+    tiktok_description = Column(Text, nullable=True)     # TikTok caption + hashtags
+    instagram_description = Column(Text, nullable=True)  # Instagram caption
+    youtube_title = Column(Text, nullable=True)          # YouTube Shorts title
+
     job = relationship("Job", back_populates="clips")
 
 # SQLite database
@@ -94,12 +100,22 @@ def _migrate_sqlite_add_columns():
         "whisper_language": "VARCHAR DEFAULT 'auto'",
         "segments_path": "VARCHAR",
     }
+    want_clips = {
+        "viral_hook_text": "TEXT",
+        "tiktok_description": "TEXT",
+        "instagram_description": "TEXT",
+        "youtube_title": "TEXT",
+    }
     try:
         with engine.begin() as conn:
             existing = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(jobs)").fetchall()}
             for col, decl in want.items():
                 if col not in existing:
                     conn.exec_driver_sql(f"ALTER TABLE jobs ADD COLUMN {col} {decl}")
+            existing_clips = {row[1] for row in conn.exec_driver_sql("PRAGMA table_info(clips)").fetchall()}
+            for col, decl in want_clips.items():
+                if col not in existing_clips:
+                    conn.exec_driver_sql(f"ALTER TABLE clips ADD COLUMN {col} {decl}")
     except Exception as e:
         print(f"[db migration] warning: {e}")
 

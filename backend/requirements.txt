@@ -10,3 +10,11 @@ python-multipart==0.0.9
 pydantic==2.7.1
 aiofiles==23.2.1
 python-dotenv==1.0.1
+
+# --- OpenShorts feature ports ---
+yt-dlp>=2024.5.1              # YouTube download
+mediapipe>=0.10.14            # face detection (BlazeFace)
+ultralytics>=8.2.0            # YOLOv8 fallback face detection
+scenedetect[opencv]>=0.6.4    # scene boundary detection
+opencv-python>=4.9.0          # video processing (MediaPipe + SceneDetect)
+numpy>=1.26.0                 # required by mediapipe/ultralytics

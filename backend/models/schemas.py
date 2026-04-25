@@ -19,6 +19,10 @@ class ClipResponse(BaseModel):
     reason: str
     file_size: int
     created_at: datetime
+    viral_hook_text: Optional[str] = None
+    tiktok_description: Optional[str] = None
+    instagram_description: Optional[str] = None
+    youtube_title: Optional[str] = None
 
 class JobResponse(BaseModel):
     job_id: str
