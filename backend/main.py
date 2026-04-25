@@ -35,6 +35,7 @@ def root():
     return {"message": "ClipForge API is running"}
 
 @app.get("/health")
+@app.get("/api/health")
 def health():
     return {"status": "ok"}
 
