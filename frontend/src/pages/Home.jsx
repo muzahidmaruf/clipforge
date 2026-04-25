@@ -34,17 +34,14 @@ const WHISPER_LANGUAGES = [
 
 const AI_MODELS = [
   // ── Qwen 3.5 ──────────────────────────────────────────────────────────────
-  { value: 'qwen3.5:32b-cloud', label: 'Qwen 3.5 32B Cloud ★ recommended' },
+  { value: 'qwen3.5:32b-cloud', label: 'Qwen 3.5 32B Cloud ★ Best for multilingual (Bengali, Hindi, etc.)' },
   { value: 'qwen3.5:14b-cloud', label: 'Qwen 3.5 14B Cloud (faster)' },
   // ── Qwen 3 ────────────────────────────────────────────────────────────────
   { value: 'qwen3:32b-cloud',   label: 'Qwen 3 32B Cloud' },
   { value: 'qwen3:14b-cloud',   label: 'Qwen 3 14B Cloud' },
   { value: 'qwen3:8b-cloud',    label: 'Qwen 3 8B Cloud (edge)' },
-  // ── Gemma 4 ───────────────────────────────────────────────────────────────
-  { value: 'gemma4:31b-cloud',  label: 'Gemma 4 31B Cloud (256K ctx)' },
-  { value: 'gemma4:26b-cloud',  label: 'Gemma 4 26B Cloud (MoE)' },
-  { value: 'gemma4:e4b-cloud',  label: 'Gemma 4 E4B Cloud (edge)' },
-  { value: 'gemma4:e2b-cloud',  label: 'Gemma 4 E2B Cloud (edge)' },
+  // ── Gemma 4 (English only) ─────────────────────────────────────────────────
+  { value: 'gemma4:31b-cloud',  label: 'Gemma 4 31B Cloud (English only - NOT recommended for Bengali)' },
 ]
 
 export default function Home() {

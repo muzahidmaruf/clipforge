@@ -3,6 +3,7 @@ import LowerThird from './LowerThird'
 import StatCard from './StatCard'
 import PullQuote from './PullQuote'
 import KineticSlam from './KineticSlam'
+import KineticText from './KineticText'
 import BulletCascade from './BulletCascade'
 import ProgressBar from './ProgressBar'
 import BarChart from './BarChart'
@@ -15,6 +16,7 @@ const COMPONENTS = {
   stat_card: StatCard,
   pull_quote: PullQuote,
   kinetic_slam: KineticSlam,
+  kinetic_text: KineticText,
   bullet_cascade: BulletCascade,
   progress_bar: ProgressBar,
   bar_chart: BarChart,

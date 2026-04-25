@@ -23,7 +23,7 @@ celery_app = Celery(
     backend=f"db+sqlite:///{DB_PATH}",
 )
 
-@celery_app.task(bind=True, max_retries=3)
+@celery_app.task(bind=True, max_retries=0)
 def process_video(self, job_id: str):
     """Main Celery task — resumes from the last checkpoint automatically.
 
@@ -270,18 +270,20 @@ def process_video(self, job_id: str):
         self.update_state(state="SUCCESS", meta={"progress": 100, "status": "completed"})
 
     except Exception as e:
-        error_msg    = str(e)
+        error_msg     = str(e)
         traceback_str = traceback.format_exc()
         print(f"[pipeline] error: {error_msg}\n{traceback_str}")
 
         if job:
             job.status        = JobStatus.FAILED
             job.error_message = error_msg
-            job.progress      = 0
+            # *** Do NOT reset progress — checkpoints are still on disk so
+            # Resume can continue exactly where things stopped. ***
             db.commit()
 
         self.update_state(state="FAILURE", meta={"error": error_msg})
-        raise self.retry(exc=e, countdown=5)
+        # No automatic retry — user clicks Resume to continue from checkpoint.
+        raise
 
     finally:
         db.close()

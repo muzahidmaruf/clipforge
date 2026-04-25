@@ -1,5 +1,12 @@
 {
   "generated_at": "2026-04-24T10:46:25.257627Z",
+  "custom_components": {
+    "kinetic_text": {
+      "description": "Stylish word-by-word animated captions with glow/slide/reveal effects",
+      "effects": ["reveal", "glow", "slide", "fade"],
+      "path": "motion/KineticText.jsx"
+    }
+  },
   "libraries": {
     "magic-ui": {
       "license": "MIT",

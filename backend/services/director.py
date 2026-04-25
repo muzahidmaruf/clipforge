@@ -66,6 +66,7 @@ SUPPORTED_TYPES = {
     "stat_card",
     "pull_quote",
     "kinetic_slam",
+    "kinetic_text",  # NEW: Stylish caption-style text with glow/slide/reveal effects
     "bullet_cascade",
     "progress_bar",
     "bar_chart",
@@ -162,6 +163,9 @@ FULL-SCREEN COMPONENTS (use sparingly, max 3 per clip, at least 4 seconds apart)
 10. **lottie** — play a small Lottie icon animation as an overlay. Use for punchy emoji-style reactions when the speaker says something that clearly maps to an available asset (e.g. `thumbs_up`, `heart_beat`, `rocket_launch`, `confetti_burst`, `trophy`). Max 3 per clip. The `lottie_id` MUST be from the LOTTIES list below.
    Fields: `lottie_id` (exact asset name from the lotties list), optional `position` ("top-left" | "top-right" | "bottom-left" | "bottom-right" | "center"), optional `scale` (0.3–1.5, default 0.6).
 
+11. **kinetic_text** — stylish caption-style text that animates word-by-word with glow/slide/blur effects (like Submagic/Opus Clip). Use for KEY phrases or captions you want to overlay dramatically — not full sentences, just 3-8 word punchy phrases. The text MUST appear verbatim in the transcript as a contiguous phrase.
+   Fields: `text` (3-8 words, exact quote from transcript), `effect` ("reveal" | "glow" | "slide" | "fade" — pick based on emotional beat: `reveal` for insights, `glow` for magical/special moments, `slide` for energy, `fade` for soft moments), optional `glowColor` (hex color for glow effect, default "#FF69B4").
+
 ---
 
 TEMPLATE LIBRARY (available vendored assets — pick ONLY from these names):
@@ -209,6 +213,7 @@ Example of a well-directed 45s clip (mostly word treatments, one peak moment):
   {{"t": 2.4, "type": "word_treatment", "word": "secretly", "treatment": "glow_pulse"}},
   {{"t": 5.8, "type": "word_treatment", "word": "80%", "treatment": "scale_pop"}},
   {{"t": 8.2, "type": "word_treatment", "word": "subconscious", "treatment": "highlight"}},
+  {{"t": 10.5, "type": "kinetic_text", "text": "here is the secret", "effect": "glow", "glowColor": "#FF69B4"}},
   {{"t": 12.0, "type": "word_treatment", "word": "not", "treatment": "strikethrough"}},
   {{"t": 12.6, "type": "word_treatment", "word": "pleasure", "treatment": "strikethrough"}},
   {{"t": 15.1, "type": "word_treatment", "word": "prediction", "treatment": "scale_pop"}},
@@ -399,6 +404,19 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
             intensity = "medium"
         return {"t": round(t, 2), "type": cue_type, "intensity": intensity}
 
+    if cue_type == "kinetic_text":
+        text = str(cue.get("text", "")).strip()
+        effect = str(cue.get("effect", "reveal")).strip().lower()
+        if not text or len(text.split()) < 3 or len(text.split()) > 8:
+            return None
+        if effect not in ("reveal", "glow", "slide", "fade"):
+            effect = "reveal"
+        glow_color = str(cue.get("glowColor", "")).strip()
+        out = {"t": round(t, 2), "type": cue_type, "text": text, "effect": effect}
+        if glow_color and re.match(r"^#[0-9A-Fa-f]{6}$", glow_color):
+            out["glowColor"] = glow_color.upper()
+        return out
+
     if cue_type == "template":
         library = str(cue.get("library", "")).strip()
         name = str(cue.get("name", "")).strip()
@@ -475,14 +493,14 @@ def _validate_cue(cue: dict, duration: float) -> dict | None:
     return None
 
 
-def _dedupe_and_space(cues: list, min_gap: float = 2.5) -> list:
+def _dedupe_and_space(cues: list, min_gap: float = 3.5) -> list:
     """Order by time. Word treatments flow freely; full-screen cues need spacing.
     Singleton types are capped at one per clip."""
     cues = sorted(cues, key=lambda c: c["t"])
     kept = []
     seen_singletons = set()
     last_fullscreen_t = -999.0
-    SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam", "confetti"}
+    SINGLETONS = {"lower_third", "pull_quote", "kinetic_slam", "confetti", "kinetic_text"}
 
     # Cap the number of templates and lotties per clip
     template_budget = 2
