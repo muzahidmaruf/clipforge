@@ -11,6 +11,9 @@ pydantic==2.7.1
 aiofiles==23.2.1
 python-dotenv==1.0.1
 
+# --- faster-whisper (optional INT8 backend, 3-5x faster on CPU) ---
+faster-whisper>=1.0.3
+
 # --- OpenShorts feature ports ---
 yt-dlp>=2024.5.1              # YouTube download
 mediapipe>=0.10.14            # face detection (BlazeFace)

@@ -30,10 +30,11 @@ async def upload_video(
     if ext not in ALLOWED_EXTENSIONS:
         raise HTTPException(400, detail=f"Invalid file type. Allowed: {ALLOWED_EXTENSIONS}")
 
-    # Validate whisper model
-    valid_whisper = {"tiny", "base", "small", "medium", "large"}
+    # Validate whisper model — allow plain sizes and "-fast" variants
+    valid_whisper = {"tiny", "base", "small", "medium", "large",
+                     "tiny-fast", "base-fast", "small-fast", "medium-fast", "large-fast"}
     if whisper_model not in valid_whisper:
-        raise HTTPException(400, detail=f"Invalid whisper model. Allowed: {valid_whisper}")
+        whisper_model = "base"  # safe fallback
 
     # Validate whisper language (accept anything — Whisper will error at runtime for unknown codes)
     from services.transcription import SUPPORTED_LANGUAGES
@@ -138,7 +139,8 @@ async def import_youtube(body: YouTubeImportRequest, db: Session = Depends(get_d
         raise HTTPException(400, detail="Invalid URL")
 
     # Validate params
-    valid_whisper = {"tiny", "base", "small", "medium", "large"}
+    valid_whisper = {"tiny", "base", "small", "medium", "large",
+                     "tiny-fast", "base-fast", "small-fast", "medium-fast", "large-fast"}
     whisper_model = body.whisper_model if body.whisper_model in valid_whisper else "base"
     whisper_language = (body.whisper_language or "auto").strip().lower()
     if whisper_language not in SUPPORTED_LANGUAGES:

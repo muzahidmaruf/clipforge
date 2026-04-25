@@ -6,11 +6,18 @@ import JobList from '../components/JobList'
 import { uploadVideo, importYouTube } from '../api/client'
 
 const WHISPER_MODELS = [
-  { value: 'tiny',   label: 'Tiny (fastest, lowest quality)' },
-  { value: 'base',   label: 'Base (balanced)' },
-  { value: 'small',  label: 'Small (better quality)' },
-  { value: 'medium', label: 'Medium (best quality, 5GB RAM)' },
-  { value: 'large',  label: 'Large (best, 10GB RAM)' },
+  // ── faster-whisper INT8 (3-5x faster on CPU) ────────────────────────────
+  { value: 'base-fast',   label: '⚡ Base Fast — INT8, 3-5× faster on CPU (recommended)' },
+  { value: 'small-fast',  label: '⚡ Small Fast — INT8, better quality, still fast' },
+  { value: 'medium-fast', label: '⚡ Medium Fast — INT8, high quality' },
+  { value: 'tiny-fast',   label: '⚡ Tiny Fast — INT8, fastest possible' },
+  { value: 'large-fast',  label: '⚡ Large Fast — INT8, best quality' },
+  // ── openai-whisper (original PyTorch) ───────────────────────────────────
+  { value: 'base',   label: 'Base (standard, GPU-accelerated)' },
+  { value: 'small',  label: 'Small (standard)' },
+  { value: 'medium', label: 'Medium (standard, 5GB RAM)' },
+  { value: 'tiny',   label: 'Tiny (standard, lowest quality)' },
+  { value: 'large',  label: 'Large (standard, 10GB RAM)' },
 ]
 
 const WHISPER_LANGUAGES = [
@@ -51,7 +58,7 @@ export default function Home() {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [error, setError] = useState(null)
-  const [whisperModel, setWhisperModel] = useState('base')
+  const [whisperModel, setWhisperModel] = useState('base-fast')
   const [aiModel, setAiModel] = useState('qwen3.5:32b-cloud')
   const [showSettings, setShowSettings] = useState(false)
   const [mode, setMode] = useState('clips')             // 'clips' | 'clean' | 'both'
@@ -231,6 +238,11 @@ export default function Home() {
                       <option key={m.value} value={m.value}>{m.label}</option>
                     ))}
                   </select>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {whisperModel.endsWith('-fast')
+                      ? '⚡ faster-whisper INT8 — 3-5× faster on CPU, same accuracy'
+                      : 'Standard openai-whisper — uses GPU if available'}
+                  </p>
                 </div>
 
                 <div>
