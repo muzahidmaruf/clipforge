@@ -2,7 +2,7 @@ import axios from 'axios'
 
 const api = axios.create({
   baseURL: '/api',
-  timeout: 300000, // 5 minutes for large uploads
+  timeout: 0, // no timeout — large file uploads can take a long time
 })
 
 export const uploadVideo = (
