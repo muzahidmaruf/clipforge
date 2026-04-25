@@ -12,8 +12,8 @@ export default function UploadZone({ onFileSelect, disabled }) {
     if (!allowed.includes(ext)) {
       return 'Invalid file type. Supported: mp4, mov, avi, mkv, webm'
     }
-    if (file.size > 500 * 1024 * 1024) {
-      return 'File too large. Max: 500MB'
+    if (file.size > 5 * 1024 * 1024 * 1024) {
+      return 'File too large. Max: 5GB'
     }
     return null
   }
@@ -87,7 +87,7 @@ export default function UploadZone({ onFileSelect, disabled }) {
             Drop your video here or click to browse
           </p>
           <p className="text-sm text-gray-500">
-            MP4, MOV, AVI, MKV, WEBM · Up to 500MB · Up to 20 minutes
+            MP4, MOV, AVI, MKV, WEBM · Up to 5GB · Up to 60 minutes
           </p>
         </div>
       </div>

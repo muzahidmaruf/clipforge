@@ -17,7 +17,7 @@ for d in [UPLOADS_DIR, TRANSCRIPTS_DIR, CLIPS_DIR, TEMP_DIR, MOTION_DIR]:
     os.makedirs(d, exist_ok=True)
 
 # Limits
-MAX_VIDEO_SIZE_MB = 10240  # 10 GB
+MAX_VIDEO_SIZE_MB = 5120  # 5 GB
 MAX_VIDEO_DURATION_MINUTES = 60
 ALLOWED_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm"}
 
