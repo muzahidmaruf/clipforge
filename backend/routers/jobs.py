@@ -9,6 +9,7 @@ from models.schemas import (
 )
 from utils.file_utils import delete_job_files
 from services.pipeline import process_video
+from services.supabase_auth import require_user, AuthUser
 
 
 def _cleaned_info(job: Job) -> CleanedVideoInfo:
@@ -25,11 +26,27 @@ def _cleaned_info(job: Job) -> CleanedVideoInfo:
         fillers_removed=job.cleaned_fillers_removed,
     )
 
+
+def _user_job(db: Session, job_id: str, user: AuthUser) -> Job:
+    """Fetch a job and verify the caller owns it. 404 if missing OR not theirs."""
+    job = db.query(Job).filter(Job.id == job_id).first()
+    if not job or (job.user_id and job.user_id != user.id):
+        raise HTTPException(404, detail="Job not found")
+    return job
+
+
 router = APIRouter(prefix="/api", tags=["jobs"])
 
+
 @router.get("/jobs")
-def list_jobs(db: Session = Depends(get_db)):
-    jobs = db.query(Job).order_by(Job.created_at.desc()).all()
+def list_jobs(db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
+    # Show jobs owned by the user, plus any legacy jobs that have no user_id
+    jobs = (
+        db.query(Job)
+          .filter((Job.user_id == user.id) | (Job.user_id.is_(None)))
+          .order_by(Job.created_at.desc())
+          .all()
+    )
     return [JobResponse(
         job_id=j.id,
         status=j.status,
@@ -42,14 +59,12 @@ def list_jobs(db: Session = Depends(get_db)):
         num_clips=j.num_clips,
     ) for j in jobs]
 
+
 @router.get("/jobs/{job_id}", response_model=JobWithClipsResponse)
-def get_job(job_id: str, db: Session = Depends(get_db)):
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(404, detail="Job not found")
-    
+def get_job(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
+    job = _user_job(db, job_id, user)
     clips = db.query(Clip).filter(Clip.job_id == job_id).all()
-    
+
     return JobWithClipsResponse(
         job_id=job.id,
         status=job.status,
@@ -72,12 +87,18 @@ def get_job(job_id: str, db: Session = Depends(get_db)):
             hook=c.hook,
             reason=c.reason,
             file_size=c.file_size,
-            created_at=c.created_at
+            created_at=c.created_at,
+            viral_hook_text=getattr(c, "viral_hook_text", None),
+            tiktok_description=getattr(c, "tiktok_description", None),
+            instagram_description=getattr(c, "instagram_description", None),
+            youtube_title=getattr(c, "youtube_title", None),
         ) for c in clips]
     )
 
+
 @router.get("/jobs/{job_id}/clips")
-def get_job_clips(job_id: str, db: Session = Depends(get_db)):
+def get_job_clips(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
+    _user_job(db, job_id, user)  # 404 if not owner
     clips = db.query(Clip).filter(Clip.job_id == job_id).all()
     return [ClipResponse(
         id=c.id,
@@ -90,16 +111,19 @@ def get_job_clips(job_id: str, db: Session = Depends(get_db)):
         hook=c.hook,
         reason=c.reason,
         file_size=c.file_size,
-        created_at=c.created_at
+        created_at=c.created_at,
+        viral_hook_text=getattr(c, "viral_hook_text", None),
+        tiktok_description=getattr(c, "tiktok_description", None),
+        instagram_description=getattr(c, "instagram_description", None),
+        youtube_title=getattr(c, "youtube_title", None),
     ) for c in clips]
 
+
 @router.post("/jobs/{job_id}/resume", response_model=JobResponse)
-def resume_job(job_id: str, db: Session = Depends(get_db)):
+def resume_job(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
     """Re-queue the job. The pipeline will skip any stage that already has a
     checkpoint on disk (transcript, cleaned video, segments, individual clips)."""
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(404, detail="Job not found")
+    job = _user_job(db, job_id, user)
     if job.status not in (JobStatus.FAILED, JobStatus.PENDING):
         raise HTTPException(400, detail="Job is already running or completed")
     if not job.video_path or not os.path.exists(job.video_path):
@@ -107,8 +131,6 @@ def resume_job(job_id: str, db: Session = Depends(get_db)):
 
     job.status        = JobStatus.PENDING
     job.error_message = None
-    # Keep job.progress as-is so the UI shows where we left off until the
-    # worker picks it up and starts updating again.
     db.commit()
 
     task = process_video.delay(job_id)
@@ -129,17 +151,14 @@ def resume_job(job_id: str, db: Session = Depends(get_db)):
 
 
 @router.post("/jobs/{job_id}/restart", response_model=JobResponse)
-def restart_job(job_id: str, db: Session = Depends(get_db)):
+def restart_job(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
     """Full restart from scratch — wipes all checkpoints and clips, then re-queues."""
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(404, detail="Job not found")
+    job = _user_job(db, job_id, user)
     if job.status not in (JobStatus.FAILED, JobStatus.PENDING):
         raise HTTPException(400, detail="Job is already running or completed")
     if not job.video_path or not os.path.exists(job.video_path):
         raise HTTPException(400, detail="Original video file no longer exists")
 
-    # Wipe checkpoints from disk
     for attr in ("transcript_path", "segments_path", "cleaned_video_path"):
         path = getattr(job, attr, None)
         if path and os.path.exists(path):
@@ -148,7 +167,6 @@ def restart_job(job_id: str, db: Session = Depends(get_db)):
             except OSError:
                 pass
 
-    # Wipe clip files and DB rows
     existing_clips = db.query(Clip).filter(Clip.job_id == job_id).all()
     for c in existing_clips:
         if c.file_path and os.path.exists(c.file_path):
@@ -158,7 +176,6 @@ def restart_job(job_id: str, db: Session = Depends(get_db)):
                 pass
     db.query(Clip).filter(Clip.job_id == job_id).delete()
 
-    # Reset job state
     job.status              = JobStatus.PENDING
     job.progress            = 0
     job.error_message       = None
@@ -188,20 +205,18 @@ def restart_job(job_id: str, db: Session = Depends(get_db)):
     )
 
 
-# Keep /retry as an alias for /resume so old calls still work
 @router.post("/jobs/{job_id}/retry", response_model=JobResponse)
-def retry_job(job_id: str, db: Session = Depends(get_db)):
-    return resume_job(job_id, db)
+def retry_job(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
+    return resume_job(job_id, db, user)
+
 
 @router.post("/jobs/{job_id}/cancel", response_model=JobResponse)
-def cancel_job(job_id: str, db: Session = Depends(get_db)):
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(404, detail="Job not found")
+def cancel_job(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
+    job = _user_job(db, job_id, user)
     if job.status in (JobStatus.COMPLETED, JobStatus.FAILED):
         raise HTTPException(400, detail="Job already finished")
 
-    task_id = getattr(job, 'celery_task_id', None)
+    task_id = getattr(job, "celery_task_id", None)
     if task_id:
         from services.pipeline import celery_app as _celery
         _celery.control.revoke(task_id, terminate=True, signal="SIGTERM")
@@ -218,17 +233,15 @@ def cancel_job(job_id: str, db: Session = Depends(get_db)):
         error_message=job.error_message,
         clips_count=job.clips_count,
         created_at=job.created_at,
-        filename=job.filename
+        filename=job.filename,
     )
 
+
 @router.delete("/jobs/{job_id}", response_model=DeleteResponse)
-def delete_job(job_id: str, db: Session = Depends(get_db)):
-    job = db.query(Job).filter(Job.id == job_id).first()
-    if not job:
-        raise HTTPException(404, detail="Job not found")
-    
+def delete_job(job_id: str, db: Session = Depends(get_db), user: AuthUser = Depends(require_user)):
+    job = _user_job(db, job_id, user)
+
     delete_job_files(job_id)
-    # Also blow away the cleaned video if one exists
     if job.cleaned_video_path and os.path.exists(job.cleaned_video_path):
         try:
             os.remove(job.cleaned_video_path)
@@ -240,6 +253,10 @@ def delete_job(job_id: str, db: Session = Depends(get_db)):
 
     return {"success": True}
 
+
+# ---------------------------------------------------------------------------
+# Cleaned-video streaming (unauth — UUID acts as capability token)
+# ---------------------------------------------------------------------------
 
 @router.get("/jobs/{job_id}/cleaned/stream")
 def stream_cleaned_video(job_id: str, db: Session = Depends(get_db)):

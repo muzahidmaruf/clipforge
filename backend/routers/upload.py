@@ -9,6 +9,7 @@ from database import get_db, Job, JobStatus
 from config import UPLOADS_DIR, MAX_VIDEO_SIZE_MB, MAX_VIDEO_DURATION_MINUTES, ALLOWED_EXTENSIONS
 from services.pipeline import process_video
 from services.video_processor import get_video_duration
+from services.supabase_auth import require_user, AuthUser
 
 router = APIRouter(prefix="/api", tags=["upload"])
 
@@ -23,7 +24,8 @@ async def upload_video(
     ai_model: str = Form("qwen3.5:32b-cloud"),
     mode: str = Form("clips"),
     num_clips: int = Form(5),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_user),
 ):
     # Validate extension
     ext = os.path.splitext(file.filename)[1].lower()
@@ -91,6 +93,7 @@ async def upload_video(
     # Create job only after file is confirmed on disk
     job = Job(
         id=job_id,
+        user_id=user.id,
         filename=file.filename,
         status=JobStatus.PENDING,
         video_path=file_path,
@@ -128,7 +131,11 @@ class YouTubeImportRequest(BaseModel):
 
 
 @router.post("/import-youtube")
-async def import_youtube(body: YouTubeImportRequest, db: Session = Depends(get_db)):
+async def import_youtube(
+    body: YouTubeImportRequest,
+    db: Session = Depends(get_db),
+    user: AuthUser = Depends(require_user),
+):
     """Download a YouTube video with yt-dlp and start processing."""
     from services.youtube import download_youtube
     from services.transcription import SUPPORTED_LANGUAGES
@@ -166,6 +173,7 @@ async def import_youtube(body: YouTubeImportRequest, db: Session = Depends(get_d
 
     job = Job(
         id=job_id,
+        user_id=user.id,
         filename=info["filename"],
         status=JobStatus.PENDING,
         video_path=info["file_path"],

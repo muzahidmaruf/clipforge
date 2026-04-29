@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@remotion/player": "^4.0.451",
+    "@supabase/supabase-js": "^2.105.1",
     "axios": "^1.7.4",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",

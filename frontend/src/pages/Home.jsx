@@ -1,9 +1,10 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Scissors, ChevronDown, Sparkles, Wand2, Layers, Upload, Youtube, Link } from 'lucide-react'
+import { Scissors, ChevronDown, Sparkles, Wand2, Layers, Upload, Youtube, Link, LogOut } from 'lucide-react'
 import UploadZone from '../components/UploadZone'
 import JobList from '../components/JobList'
 import { uploadVideo, importYouTube } from '../api/client'
+import { useAuth } from '../contexts/AuthContext'
 
 const WHISPER_MODELS = [
   // ── faster-whisper INT8 (3-5x faster on CPU) ────────────────────────────
@@ -65,6 +66,7 @@ export default function Home() {
   const [numClips, setNumClips] = useState(5)           // 1..15
   const [whisperLanguage, setWhisperLanguage] = useState('auto')  // ISO 639-1 or 'auto'
   const navigate = useNavigate()
+  const { user, signOut } = useAuth()
 
   const hasInput = inputMode === 'file' ? !!file : youtubeUrl.trim().length > 0
 
@@ -75,6 +77,19 @@ export default function Home() {
 
   const handleUpload = async () => {
     if (!hasInput) return
+
+    // Pre-flight check: verify backend is reachable
+    try {
+      const healthCheck = await fetch('/api/health', { method: 'GET' })
+      if (!healthCheck.ok) {
+        throw new Error('Backend server is not responding')
+      }
+    } catch (fetchErr) {
+      console.error('[Health Check] Failed:', fetchErr)
+      setError('Cannot connect to backend server. Please ensure the backend is running on http://localhost:8000')
+      return
+    }
+
     setUploading(true)
     setUploadProgress(0)
     setError(null)
@@ -89,11 +104,12 @@ export default function Home() {
       const { job_id } = response.data
       navigate(`/results/${job_id}`)
     } catch (err) {
+      console.error('[Upload] Error:', err)
       let msg = inputMode === 'youtube' ? 'YouTube import failed.' : 'Upload failed. Please try again.'
       if (err.response?.data?.detail) {
         msg = err.response.data.detail
-      } else if (err.message?.includes('Network Error')) {
-        msg = 'Network error. Check connection or try a smaller file.'
+      } else if (err.code === 'ERR_NETWORK' || err.message?.includes('Network Error')) {
+        msg = 'Network error during upload. This can happen with large files. Try: 1) Refresh the page, 2) Check backend is running, 3) Try a smaller file'
       } else if (err.message) {
         msg = err.message
       }
@@ -104,6 +120,19 @@ export default function Home() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center px-4 py-12">
+      {/* User badge / logout */}
+      {user && (
+        <div className="absolute top-4 right-4 flex items-center gap-2 text-xs text-gray-400">
+          <span className="hidden sm:inline">{user.email}</span>
+          <button
+            onClick={async () => { await signOut(); navigate('/login') }}
+            title="Sign out"
+            className="p-1.5 rounded-lg border border-border hover:border-accent/50 hover:text-white transition-colors"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
+        </div>
+      )}
       <div className="w-full max-w-2xl">
         {/* Header */}
         <div className="text-center mb-12">

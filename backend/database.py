@@ -21,6 +21,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, nullable=True, index=True)  # Supabase auth.users.id
     filename = Column(String, nullable=False)
     status = Column(String, default=JobStatus.PENDING)
     progress = Column(Integer, default=0)
@@ -99,6 +100,7 @@ def _migrate_sqlite_add_columns():
         "cleaned_fillers_removed": "INTEGER",
         "whisper_language": "VARCHAR DEFAULT 'auto'",
         "segments_path": "VARCHAR",
+        "user_id": "VARCHAR",
     }
     want_clips = {
         "viral_hook_text": "TEXT",

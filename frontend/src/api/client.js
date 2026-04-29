@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { supabase } from '../lib/supabase'
 
 const api = axios.create({
   baseURL: '/api',
@@ -9,9 +10,19 @@ const api = axios.create({
   maxContentLength: Infinity,
 })
 
-// Add request interceptor for debugging
+// Auth + debug interceptor — attaches the current Supabase JWT
 api.interceptors.request.use(
-  (config) => {
+  async (config) => {
+    try {
+      const { data } = await supabase.auth.getSession()
+      const token = data?.session?.access_token
+      if (token) {
+        config.headers = config.headers || {}
+        config.headers.Authorization = `Bearer ${token}`
+      }
+    } catch (e) {
+      console.warn('[API] could not attach auth token:', e)
+    }
     console.log('[API] Request:', config.method?.toUpperCase(), config.url, config.baseURL)
     return config
   },
@@ -47,8 +58,8 @@ export const uploadVideo = (
   formData.append('ai_model', aiModel || 'qwen3.5:32b-cloud')
   formData.append('mode', mode)
   formData.append('num_clips', String(numClips))
+  // Don't set Content-Type header manually - axios/browser will set it with boundary
   return api.post('/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
     onUploadProgress: onProgress ? (progressEvent) => {
       const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
       onProgress(percentCompleted)
